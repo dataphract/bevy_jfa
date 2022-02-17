@@ -1,24 +1,19 @@
-//! A Bevy plugin for generating outlines using the jump flooding algorithm (JFA).
+//! A Bevy library for computing the Jump Flooding Algorithm.
 //!
-//! Adapted from "The Quest for Very Wide Outlines" by Ben Golus.
-//! https://bgolus.medium.com/the-quest-for-very-wide-outlines-ba82ed442cd9
+//! Outlines adapted from ["The Quest for Very Wide Outlines" by Ben Golus][0].
+//!
+//! [0]: https://bgolus.medium.com/the-quest-for-very-wide-outlines-ba82ed442cd9
 
-use std::{borrow::Cow, mem, num::NonZeroU64, ops::Deref};
+use std::num::NonZeroU64;
 
 use bevy::{
     app::prelude::*,
     asset::{Assets, Handle, HandleUntyped},
     core::FloatOrd,
-    core_pipeline::{node::MAIN_PASS_DEPENDENCIES, Opaque3d, Transparent3d},
-    ecs::{
-        prelude::*,
-        system::{lifetimeless::SRes, SystemParamItem},
-    },
+    core_pipeline::node::MAIN_PASS_DEPENDENCIES,
+    ecs::prelude::*,
     math::prelude::*,
-    pbr::{
-        DrawMesh, MeshPipeline, MeshPipelineKey, MeshUniform, SetMeshBindGroup,
-        SetMeshViewBindGroup,
-    },
+    pbr::{DrawMesh, MeshPipelineKey, MeshUniform, SetMeshBindGroup, SetMeshViewBindGroup},
     reflect::TypeUuid,
     render::{
         camera::{ActiveCameras, CameraPlugin, ExtractedCameraNames},
@@ -29,11 +24,10 @@ use bevy::{
         },
         render_phase::{
             AddRenderCommand, CachedPipelinePhaseItem, DrawFunctionId, DrawFunctions,
-            EntityPhaseItem, PhaseItem, RenderCommand, RenderCommandResult, RenderPhase,
-            SetItemPipeline, TrackedRenderPass,
+            EntityPhaseItem, PhaseItem, RenderPhase, SetItemPipeline,
         },
         render_resource::{
-            std140::{AsStd140, DynamicUniform, Std140},
+            std140::{AsStd140, DynamicUniform},
             *,
         },
         renderer::{RenderContext, RenderDevice, RenderQueue},
@@ -209,10 +203,7 @@ impl FromWorld for OutlineResources {
         }
         jfa_distance_buffer.write_buffer(&device, &queue);
 
-        let dims = jfa::Dimensions {
-            width: size.width,
-            height: size.height,
-        };
+        let dims = jfa::Dimensions::new(size.width, size.height);
         let mut jfa_dims_buffer = UniformVec::default();
         jfa_dims_buffer.push(dims);
         jfa_dims_buffer.write_buffer(&device, &queue);
@@ -337,12 +328,10 @@ fn recreate_outline_resources(
         depth_or_array_layers: 1,
     };
 
+    let new_dims = jfa::Dimensions::new(size.width, size.height);
     let dims = outline.jfa_dims_buffer.get_mut(0);
-    if size.width != dims.width || size.height != dims.height {
-        *dims = jfa::Dimensions {
-            width: size.width,
-            height: size.height,
-        };
+    if *dims != new_dims {
+        *dims = new_dims;
         outline.jfa_dims_buffer.write_buffer(&device, &queue);
     }
 
@@ -383,16 +372,6 @@ fn recreate_outline_resources(
             "outline_jfa_primary_bind_group",
             &outline.jfa_secondary_output.default_view,
         );
-    }
-}
-
-pub struct FullscreenTriVertexBuffer(Buffer);
-
-impl Deref for FullscreenTriVertexBuffer {
-    type Target = Buffer;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 
@@ -459,19 +438,6 @@ impl Plugin for OutlinePlugin {
         // - queue meshes
 
         if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            let verts: [Vec2; 3] = [
-                Vec2::new(-1.0, -1.0),
-                Vec2::new(3.0, -1.0),
-                Vec2::new(-1.0, 3.0),
-            ];
-            let device = render_app.world.get_resource::<RenderDevice>().unwrap();
-            let buf = device.create_buffer_with_data(&BufferInitDescriptor {
-                label: Some("outline_fullscreen_vertex_buffer"),
-                contents: verts.as_std140().as_bytes(),
-                usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
-            });
-            let fullscreen_verts = FullscreenTriVertexBuffer(buf);
-
             render_app
                 .init_resource::<DrawFunctions<MeshStencil>>()
                 .add_render_command::<MeshStencil, SetItemPipeline>()
@@ -481,11 +447,10 @@ impl Plugin for OutlinePlugin {
                 .init_resource::<SpecializedPipelines<stencil::MeshStencilPipeline>>()
                 .init_resource::<jfa_init::JfaInitPipeline>()
                 .init_resource::<jfa::JfaPipeline>()
-                .insert_resource(fullscreen_verts)
                 .add_system_to_stage(RenderStage::Extract, extract_outlines)
                 .add_system_to_stage(RenderStage::Extract, extract_stencil_camera_phase)
                 .add_system_to_stage(RenderStage::Prepare, recreate_outline_resources)
-                .add_system_to_stage(RenderStage::Queue, queue_mesh_masks);
+                .add_system_to_stage(RenderStage::Queue, queue_mesh_stencils);
 
             let mut outline_graph = RenderGraph::default();
             let stencil_node = MeshStencilNode::new(&mut render_app.world);
@@ -604,66 +569,6 @@ pub fn extract_outlines(
     commands.insert_or_spawn_batch(batches);
 }
 
-pub struct MeshMaskPipeline {
-    mesh_pipeline: MeshPipeline,
-    mask_shader: Handle<Shader>,
-}
-
-impl FromWorld for MeshMaskPipeline {
-    fn from_world(world: &mut World) -> Self {
-        let mesh_pipeline = world.get_resource::<MeshPipeline>().unwrap().clone();
-
-        MeshMaskPipeline {
-            mesh_pipeline,
-            mask_shader: STENCIL_SHADER_HANDLE.typed::<Shader>(),
-        }
-    }
-}
-
-impl SpecializedPipeline for MeshMaskPipeline {
-    type Key = ();
-
-    fn specialize(&self, (): Self::Key) -> RenderPipelineDescriptor {
-        let mut descriptor = self.mesh_pipeline.specialize(MeshPipelineKey::empty());
-
-        descriptor.vertex.shader = self.mask_shader.clone();
-        descriptor.vertex.entry_point = Cow::from("vertex");
-
-        descriptor.fragment = None;
-
-        descriptor.layout = Some(vec![
-            self.mesh_pipeline.view_layout.clone(),
-            self.mesh_pipeline.mesh_layout.clone(),
-        ]);
-
-        descriptor
-    }
-}
-
-pub struct SetMaskPipeline;
-
-impl RenderCommand<Transparent3d> for SetMaskPipeline {
-    // This pipeline cache lookup is not necessary, but it allows reuse of
-    // `Transparent3d`. Should probably not set the pipeline for each mesh.
-    type Param = SRes<RenderPipelineCache>;
-
-    fn render<'w>(
-        _: Entity,
-        item: &Transparent3d,
-        pipeline_cache: SystemParamItem<'w, '_, Self::Param>,
-        pass: &mut TrackedRenderPass<'w>,
-    ) -> RenderCommandResult {
-        pass.set_render_pipeline(
-            pipeline_cache
-                .into_inner()
-                .get_state(item.pipeline)
-                .unwrap(),
-        );
-
-        RenderCommandResult::Success
-    }
-}
-
 pub fn extract_stencil_camera_phase(mut commands: Commands, active_cameras: Res<ActiveCameras>) {
     if let Some(camera_3d) = active_cameras.get(CameraPlugin::CAMERA_3D) {
         if let Some(entity) = camera_3d.entity {
@@ -674,7 +579,7 @@ pub fn extract_stencil_camera_phase(mut commands: Commands, active_cameras: Res<
     }
 }
 
-pub fn queue_mesh_masks(
+pub fn queue_mesh_stencils(
     mesh_stencil_draw_functions: Res<DrawFunctions<MeshStencil>>,
     mesh_stencil_pipeline: Res<MeshStencilPipeline>,
     mut pipelines: ResMut<SpecializedPipelines<MeshStencilPipeline>>,

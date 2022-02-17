@@ -22,10 +22,19 @@ pub struct JumpDist {
     pub dist: u32,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, AsStd140)]
+#[derive(Copy, Clone, Debug, PartialEq, AsStd140)]
 pub struct Dimensions {
-    pub width: u32,
-    pub height: u32,
+    inv_width: f32,
+    inv_height: f32,
+}
+
+impl Dimensions {
+    pub fn new(width: u32, height: u32) -> Dimensions {
+        Dimensions {
+            inv_width: 1.0 / width as f32,
+            inv_height: 1.0 / height as f32,
+        }
+    }
 }
 
 pub struct JfaPipeline {
@@ -38,7 +47,7 @@ impl FromWorld for JfaPipeline {
         let jfa_bind_group_layout = res.jfa_bind_group_layout.clone();
         let mut pipeline_cache = world.get_resource_mut::<RenderPipelineCache>().unwrap();
         let cached = pipeline_cache.queue(RenderPipelineDescriptor {
-            label: Some("outline_coords_pipeline".into()),
+            label: Some("outline_jfa_pipeline".into()),
             layout: Some(vec![jfa_bind_group_layout]),
             vertex: VertexState {
                 shader: JFA_SHADER_HANDLE.typed::<Shader>(),
@@ -113,7 +122,7 @@ impl Node for JfaNode {
             }
         };
 
-        let max_exp = 8;
+        let max_exp = 9;
         for it in 0..=max_exp {
             let exp = max_exp - it;
 
@@ -131,15 +140,8 @@ impl Node for JfaNode {
                 view: target,
                 resolve_target: None,
                 ops: Operations {
-                    load: LoadOp::Clear(
-                        Color::RgbaLinear {
-                            red: -1.0,
-                            green: -1.0,
-                            blue: 0.0,
-                            alpha: 0.0,
-                        }
-                        .into(),
-                    ),
+                    // TODO: ideally, this would be the equivalent of DONT_CARE, but wgpu doesn't expose that.
+                    load: LoadOp::Load,
                     store: true,
                 },
             };

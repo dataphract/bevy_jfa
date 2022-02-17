@@ -5,8 +5,8 @@ struct JumpDist {
 };
 
 struct Dimensions {
-    width: u32;
-    height: u32;
+    inv_width: f32;
+    inv_height: f32;
 };
 
 [[group(0), binding(0)]]
@@ -19,44 +19,41 @@ var src_buffer: texture_2d<f32>;
 var src_sampler: sampler;
 
 struct FragmentIn {
-    [[builtin(position)]] position: vec4<f32>;
     [[location(0)]] texcoord: vec2<f32>;
 };
 
 [[stage(fragment)]]
 fn fragment(in: FragmentIn) -> [[location(0)]] vec4<f32> {
-    // Absolute x-offset for samples to the left and right
-    //let dx = f32(jump_dist.dist) / f32(dims.width);
-    // Absolute y-offset for samples to the top and bottom
-    //let dy = f32(jump_dist.dist) / f32(dims.height);
-    let inv_width = 1.0 / f32(dims.width);
-    let inv_height = 1.0 / f32(dims.height);
+    let dx = dims.inv_width * f32(jump_dist.dist);
+    let dy = dims.inv_height * f32(jump_dist.dist);
 
-    let texcoord = vec2<f32>(
-        inv_width * in.position.x,
-        inv_height * in.position.y,
-    );
+    // Fetch 9 samples in a 3x3 grid, jump_dist pixels apart.
+    var samples: array<vec2<f32>, 9>;
+    samples[0] = textureSample(src_buffer, src_sampler, in.texcoord + vec2<f32>(-dx, -dy)).xy;
+    samples[1] = textureSample(src_buffer, src_sampler, in.texcoord + vec2<f32>(-dx, 0.0)).xy;
+    samples[2] = textureSample(src_buffer, src_sampler, in.texcoord + vec2<f32>(-dx, dy)).xy;
+    samples[3] = textureSample(src_buffer, src_sampler, in.texcoord + vec2<f32>(0.0, -dy)).xy;
+    samples[4] = textureSample(src_buffer, src_sampler, in.texcoord).xy;
+    samples[5] = textureSample(src_buffer, src_sampler, in.texcoord + vec2<f32>(0.0, dy)).xy;
+    samples[6] = textureSample(src_buffer, src_sampler, in.texcoord + vec2<f32>(dx, -dy)).xy;
+    samples[7] = textureSample(src_buffer, src_sampler, in.texcoord + vec2<f32>(dx, 0.0)).xy;
+    samples[8] = textureSample(src_buffer, src_sampler, in.texcoord + vec2<f32>(dx, dy)).xy;
 
-    var min_dist2: f32 = 1.0 / 0.0; // infinity
+    // TODO: this is actually the largest finite f32. WGSL doesn't seem to have
+    // a way to write an infinity float literal.
+    let infinity = 0x1.FFFFFp127;
+
+    var min_dist2: f32 = infinity;
     var min_dist2_pos: vec2<f32> = vec2<f32>(-1.0, -1.0);
-    for (var i: i32 = -1; i < 2; i = i + 1) {
-        let x_dist = i32(jump_dist.dist) * i;
-        let sample_x = inv_width * (in.position.x + f32(x_dist));
+    for (var i: i32 = 0; i < 9; i = i + 1) {
+        let sample = samples[i];
+        let delta = in.texcoord - sample;
+        let dist2 = dot(delta, delta);
 
-        for (var j: i32 = -1; j < 2; j = j + 1) {
-            let y_dist = i32(jump_dist.dist) * j;
-            let sample_y = inv_height * (in.position.y + f32(y_dist));
-
-            let sample_texcoord = vec2<f32>(sample_x, sample_y);
-            var sampled_pos = textureSample(src_buffer, src_sampler, sample_texcoord);
-            let delta = texcoord - sampled_pos.xy;
-            let dist2 = dot(delta, delta);
-
-            // It doesn't seem as though there's a way to avoid this branch :(
-            if (sampled_pos.x != -1.0 && dist2 < min_dist2) {
-                min_dist2 = dist2;
-                min_dist2_pos = sampled_pos.xy;
-            }
+        // It doesn't seem as though there's a way to avoid this branch :(
+        if (sample.x != -1.0 && dist2 < min_dist2) {
+            min_dist2 = dist2;
+            min_dist2_pos = sample;
         }
     }
 
