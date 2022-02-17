@@ -19,15 +19,15 @@ use crate::{OutlineResources, JFA_INIT_SHADER_HANDLE};
 
 pub const TEXTURE_FORMAT: TextureFormat = TextureFormat::Rg16Snorm;
 
-pub struct CoordsPipeline {
+pub struct JfaInitPipeline {
     cached: CachedPipelineId,
 }
 
-impl FromWorld for CoordsPipeline {
+impl FromWorld for JfaInitPipeline {
     fn from_world(world: &mut World) -> Self {
         let mut pipeline_cache = world.get_resource_mut::<RenderPipelineCache>().unwrap();
         let cached = pipeline_cache.queue(RenderPipelineDescriptor {
-            label: Some("outline_coords_pipeline".into()),
+            label: Some("outline_jfa_init_pipeline".into()),
             layout: None,
             vertex: VertexState {
                 shader: JFA_INIT_SHADER_HANDLE.typed::<Shader>(),
@@ -74,24 +74,24 @@ impl FromWorld for CoordsPipeline {
             }),
         });
 
-        CoordsPipeline { cached }
+        JfaInitPipeline { cached }
     }
 }
 
-pub struct CoordsNode;
+pub struct JfaInitNode;
 
-impl CoordsNode {
+impl JfaInitNode {
     pub const IN_STENCIL: &'static str = "in_stencil";
-    pub const OUT_COORDS: &'static str = "out_coords";
+    pub const OUT_JFA_INIT: &'static str = "out_jfa_init";
 }
 
-impl Node for CoordsNode {
+impl Node for JfaInitNode {
     fn input(&self) -> Vec<SlotInfo> {
         vec![SlotInfo::new(Self::IN_STENCIL, SlotType::TextureView)]
     }
 
     fn output(&self) -> Vec<SlotInfo> {
-        vec![SlotInfo::new(Self::OUT_COORDS, SlotType::TextureView)]
+        vec![SlotInfo::new(Self::OUT_JFA_INIT, SlotType::TextureView)]
     }
 
     fn run(
@@ -103,14 +103,14 @@ impl Node for CoordsNode {
         let res = world.get_resource::<OutlineResources>().unwrap();
         graph
             .set_output(
-                Self::OUT_COORDS,
+                Self::OUT_JFA_INIT,
                 res.jfa_primary_output.default_view.clone(),
             )
             .unwrap();
 
         let stencil = graph.get_input_texture(Self::IN_STENCIL).unwrap();
 
-        let pipeline = world.get_resource::<CoordsPipeline>().unwrap();
+        let pipeline = world.get_resource::<JfaInitPipeline>().unwrap();
         let pipeline_cache = world.get_resource::<RenderPipelineCache>().unwrap();
         let cached_pipeline = match pipeline_cache.get(pipeline.cached) {
             Some(c) => c,
@@ -123,7 +123,7 @@ impl Node for CoordsNode {
         let render_pass = render_context
             .command_encoder
             .begin_render_pass(&RenderPassDescriptor {
-                label: Some("outline_coords"),
+                label: Some("outline_jfa_init"),
                 color_attachments: &[RenderPassColorAttachment {
                     view: &res.jfa_primary_output.default_view,
                     resolve_target: None,

@@ -44,12 +44,12 @@ use bevy::{
     transform::components::GlobalTransform,
     window::WindowId,
 };
-use coords::CoordsNode;
 use jfa::JfaNode;
+use jfa_init::JfaInitNode;
 use stencil::{MeshStencilNode, MeshStencilPipeline};
 
-mod coords;
 mod jfa;
+mod jfa_init;
 mod stencil;
 
 #[derive(Default)]
@@ -479,7 +479,7 @@ impl Plugin for OutlinePlugin {
                 .init_resource::<OutlineResources>()
                 .init_resource::<stencil::MeshStencilPipeline>()
                 .init_resource::<SpecializedPipelines<stencil::MeshStencilPipeline>>()
-                .init_resource::<coords::CoordsPipeline>()
+                .init_resource::<jfa_init::JfaInitPipeline>()
                 .init_resource::<jfa::JfaPipeline>()
                 .insert_resource(fullscreen_verts)
                 .add_system_to_stage(RenderStage::Extract, extract_outlines)
@@ -502,20 +502,20 @@ impl Plugin for OutlinePlugin {
                     MeshStencilNode::IN_VIEW,
                 )
                 .unwrap();
-            outline_graph.add_node(outline_graph::node::JFA_INIT_PASS, CoordsNode);
+            outline_graph.add_node(outline_graph::node::JFA_INIT_PASS, JfaInitNode);
             outline_graph
                 .add_slot_edge(
                     outline_graph::node::STENCIL_PASS,
                     MeshStencilNode::OUT_STENCIL,
                     outline_graph::node::JFA_INIT_PASS,
-                    CoordsNode::IN_STENCIL,
+                    JfaInitNode::IN_STENCIL,
                 )
                 .unwrap();
             outline_graph.add_node(outline_graph::node::JFA_PASS, JfaNode);
             outline_graph
                 .add_slot_edge(
                     outline_graph::node::JFA_INIT_PASS,
-                    CoordsNode::OUT_COORDS,
+                    JfaInitNode::OUT_JFA_INIT,
                     outline_graph::node::JFA_PASS,
                     JfaNode::IN_BASE,
                 )
