@@ -15,9 +15,7 @@ use bevy::{
     },
 };
 
-use crate::{OutlineResources, JFA_INIT_SHADER_HANDLE};
-
-pub const TEXTURE_FORMAT: TextureFormat = TextureFormat::Rg16Snorm;
+use crate::{resources::OutlineResources, JFA_INIT_SHADER_HANDLE, JFA_TEXTURE_FORMAT};
 
 pub struct JfaInitPipeline {
     cached: CachedPipelineId,
@@ -67,7 +65,7 @@ impl FromWorld for JfaInitPipeline {
                 shader_defs: vec![],
                 entry_point: "fragment".into(),
                 targets: vec![ColorTargetState {
-                    format: TEXTURE_FORMAT,
+                    format: JFA_TEXTURE_FORMAT,
                     blend: None,
                     write_mask: ColorWrites::ALL,
                 }],
@@ -78,10 +76,23 @@ impl FromWorld for JfaInitPipeline {
     }
 }
 
+/// Render graph node for the JFA initialization pass.
 pub struct JfaInitNode;
 
 impl JfaInitNode {
+    /// The input stencil buffer.
+    ///
+    /// This should have the format `TextureFormat::Depth24PlusStencil8`.
+    /// Fragments in the JFA initialization pass will pass the stencil test if
+    /// the corresponding stencil buffer value is 255, and fail otherwise.
+    /// The depth aspect is ignored.
     pub const IN_STENCIL: &'static str = "in_stencil";
+
+    /// The produced initialized JFA buffer.
+    ///
+    /// This has the format `bevy_jfa::JFA_TEXTURE_FORMAT`. Fragments that pass
+    /// the stencil test are assigned their framebuffer coordinates. Fragments
+    /// that fail the stencil test are assigned a value of (-1, -1).
     pub const OUT_JFA_INIT: &'static str = "out_jfa_init";
 }
 

@@ -4,13 +4,11 @@
 //!
 //! [0]: https://bgolus.medium.com/the-quest-for-very-wide-outlines-ba82ed442cd9
 
-use std::num::NonZeroU64;
-
 use bevy::{
     app::prelude::*,
     asset::{Assets, Handle, HandleUntyped},
     core::FloatOrd,
-    core_pipeline::node::MAIN_PASS_DEPENDENCIES,
+    core_pipeline::node::{MAIN_PASS_DEPENDENCIES, MAIN_PASS_DRIVER},
     ecs::prelude::*,
     math::prelude::*,
     pbr::{DrawMesh, MeshPipelineKey, MeshUniform, SetMeshBindGroup, SetMeshViewBindGroup},
@@ -26,12 +24,9 @@ use bevy::{
             AddRenderCommand, CachedPipelinePhaseItem, DrawFunctionId, DrawFunctions,
             EntityPhaseItem, PhaseItem, RenderPhase, SetItemPipeline,
         },
-        render_resource::{
-            std140::{AsStd140, DynamicUniform},
-            *,
-        },
-        renderer::{RenderContext, RenderDevice, RenderQueue},
-        texture::{CachedTexture, TextureCache},
+        render_resource::{std140::AsStd140, *},
+        renderer::RenderContext,
+        texture::BevyDefault,
         view::{ExtractedView, ExtractedWindows, VisibleEntities},
         RenderApp, RenderStage,
     },
@@ -40,340 +35,28 @@ use bevy::{
 };
 use jfa::JfaNode;
 use jfa_init::JfaInitNode;
+use outline::OutlineNode;
 use stencil::{MeshStencilNode, MeshStencilPipeline};
 
 mod jfa;
 mod jfa_init;
+mod outline;
+mod resources;
 mod stencil;
+
+pub const JFA_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rg16Snorm;
+const FULLSCREEN_PRIMITIVE_STATE: PrimitiveState = PrimitiveState {
+    topology: PrimitiveTopology::TriangleList,
+    strip_index_format: None,
+    front_face: FrontFace::Ccw,
+    cull_mode: Some(Face::Back),
+    unclipped_depth: false,
+    polygon_mode: PolygonMode::Fill,
+    conservative: false,
+};
 
 #[derive(Default)]
 pub struct OutlinePlugin;
-
-pub struct OutlineResources {
-    // Stencil target for initial stencil pass.
-    stencil_output: CachedTexture,
-
-    sampler: Sampler,
-    jfa_bind_group_layout: BindGroupLayout,
-    // Dynamic uniform buffer containing power-of-two JFA distances from 1 to 32768.
-    // TODO: use instance ID instead?
-    jfa_distance_buffer: UniformVec<DynamicUniform<jfa::JumpDist>>,
-    jfa_distance_offsets: Vec<u32>,
-    jfa_dims_buffer: UniformVec<jfa::Dimensions>,
-
-    // Bind group for jump flood passes targeting the primary output.
-    jfa_primary_bind_group: BindGroup,
-    // Primary jump flood output.
-    jfa_primary_output: CachedTexture,
-
-    // Bind group for jump flood passes targeting the secondary output.
-    jfa_secondary_bind_group: BindGroup,
-    // Secondary jump flood output.
-    jfa_secondary_output: CachedTexture,
-
-    outline_bind_group: BindGroup,
-}
-
-fn create_jfa_bind_group(
-    device: &RenderDevice,
-    layout: &BindGroupLayout,
-    label: &str,
-    dist_buffer: BindingResource,
-    dims_buffer: BindingResource,
-    input: &TextureView,
-    sampler: &Sampler,
-) -> BindGroup {
-    device.create_bind_group(&BindGroupDescriptor {
-        label: Some(label),
-        layout,
-        entries: &[
-            BindGroupEntry {
-                binding: 0,
-                resource: dist_buffer,
-            },
-            BindGroupEntry {
-                binding: 1,
-                resource: dims_buffer,
-            },
-            BindGroupEntry {
-                binding: 2,
-                resource: BindingResource::TextureView(input),
-            },
-            BindGroupEntry {
-                binding: 3,
-                resource: BindingResource::Sampler(sampler),
-            },
-        ],
-    })
-}
-
-impl OutlineResources {
-    fn create_jfa_bind_group(
-        &self,
-        device: &RenderDevice,
-        label: &str,
-        input: &TextureView,
-    ) -> BindGroup {
-        create_jfa_bind_group(
-            device,
-            &self.jfa_bind_group_layout,
-            label,
-            self.jfa_distance_buffer.binding().unwrap(),
-            self.jfa_dims_buffer.binding().unwrap(),
-            input,
-            &self.sampler,
-        )
-    }
-}
-
-impl FromWorld for OutlineResources {
-    fn from_world(world: &mut World) -> Self {
-        let size = Extent3d {
-            width: 1,
-            height: 1,
-            depth_or_array_layers: 1,
-        };
-
-        let device = world.get_resource::<RenderDevice>().unwrap().clone();
-        let queue = world.get_resource::<RenderQueue>().unwrap().clone();
-        let mut textures = world.get_resource_mut::<TextureCache>().unwrap();
-
-        let stencil_desc = tex_desc(
-            "outline_stencil_output",
-            size,
-            TextureFormat::Depth24PlusStencil8,
-        );
-        let stencil_output = textures.get(&device, stencil_desc);
-
-        let jfa_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            label: Some("outline_jfa_bind_group_layout"),
-            entries: &[
-                BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: true,
-                        min_binding_size: BufferSize::new(
-                            jfa::JumpDist::std140_size_static() as u64
-                        ),
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Buffer {
-                        ty: BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: NonZeroU64::new(
-                            <jfa::Dimensions as AsStd140>::std140_size_static()
-                                .try_into()
-                                .unwrap(),
-                        ),
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Texture {
-                        sample_type: TextureSampleType::Float { filterable: false },
-                        view_dimension: TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: ShaderStages::FRAGMENT,
-                    ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-            ],
-        });
-        let mut jfa_distance_buffer = UniformVec::default();
-        let mut jfa_distance_offsets = Vec::new();
-        for exp in 0_u32..16 {
-            let ofs = jfa_distance_buffer.push(DynamicUniform(jfa::JumpDist {
-                dist: 2_u32.pow(exp),
-            }));
-            // FIXME this calculation is fragile
-            jfa_distance_offsets.push(256 * ofs as u32);
-        }
-        jfa_distance_buffer.write_buffer(&device, &queue);
-
-        let dims = jfa::Dimensions::new(size.width, size.height);
-        let mut jfa_dims_buffer = UniformVec::default();
-        jfa_dims_buffer.push(dims);
-        jfa_dims_buffer.write_buffer(&device, &queue);
-
-        // TODO: use Rg16Snorm if supported for higher precision
-        let jfa_primary_output_desc =
-            tex_desc("outline_jfa_primary_output", size, TextureFormat::Rg16Snorm);
-        let jfa_primary_output = textures.get(&device, jfa_primary_output_desc);
-        let jfa_secondary_output_desc = tex_desc(
-            "outline_jfa_secondary_output",
-            size,
-            TextureFormat::Rg16Snorm,
-        );
-        let jfa_secondary_output = textures.get(&device, jfa_secondary_output_desc);
-
-        let sampler = device.create_sampler(&SamplerDescriptor {
-            label: Some("outline_jfa_sampler"),
-            address_mode_u: AddressMode::ClampToEdge,
-            address_mode_v: AddressMode::ClampToEdge,
-            address_mode_w: AddressMode::ClampToEdge,
-            mag_filter: FilterMode::Nearest,
-            min_filter: FilterMode::Nearest,
-            mipmap_filter: FilterMode::Nearest,
-            compare: None,
-            ..Default::default()
-        });
-        let jfa_primary_bind_group = create_jfa_bind_group(
-            &device,
-            &jfa_bind_group_layout,
-            "outline_jfa_primary_bind_group",
-            jfa_distance_buffer.binding().unwrap(),
-            jfa_dims_buffer.binding().unwrap(),
-            &jfa_secondary_output.default_view,
-            &sampler,
-        );
-        let jfa_secondary_bind_group = create_jfa_bind_group(
-            &device,
-            &jfa_bind_group_layout,
-            "outline_jfa_secondary_bind_group",
-            jfa_distance_buffer.binding().unwrap(),
-            jfa_dims_buffer.binding().unwrap(),
-            &jfa_primary_output.default_view,
-            &sampler,
-        );
-
-        let outline_bind_group_layout =
-            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-                label: Some("outline_outline_bind_group_layout"),
-                entries: &[
-                    BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: ShaderStages::FRAGMENT,
-                        ty: BindingType::Texture {
-                            sample_type: TextureSampleType::Float { filterable: false },
-                            view_dimension: TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: ShaderStages::FRAGMENT,
-                        ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
-                        count: None,
-                    },
-                ],
-            });
-        let outline_bind_group = device.create_bind_group(&BindGroupDescriptor {
-            label: Some("outline_outline_bind_group"),
-            layout: &outline_bind_group_layout,
-            entries: &[
-                BindGroupEntry {
-                    binding: 0,
-                    resource: BindingResource::TextureView(&jfa_primary_output.default_view),
-                },
-                BindGroupEntry {
-                    binding: 1,
-                    resource: BindingResource::Sampler(&sampler),
-                },
-            ],
-        });
-
-        OutlineResources {
-            stencil_output,
-            jfa_bind_group_layout,
-            sampler,
-            jfa_distance_buffer,
-            jfa_distance_offsets,
-            jfa_dims_buffer,
-            jfa_primary_bind_group,
-            jfa_primary_output,
-            jfa_secondary_bind_group,
-            jfa_secondary_output,
-            outline_bind_group,
-        }
-    }
-}
-
-fn tex_desc(label: &'static str, size: Extent3d, format: TextureFormat) -> TextureDescriptor {
-    TextureDescriptor {
-        label: Some(label),
-        size,
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: TextureDimension::D2,
-        format,
-        usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
-    }
-}
-
-fn recreate_outline_resources(
-    mut outline: ResMut<OutlineResources>,
-    device: Res<RenderDevice>,
-    queue: Res<RenderQueue>,
-    mut textures: ResMut<TextureCache>,
-    windows: Res<ExtractedWindows>,
-) {
-    let primary = windows.get(&WindowId::primary()).unwrap();
-    let size = Extent3d {
-        width: primary.physical_width,
-        height: primary.physical_height,
-        depth_or_array_layers: 1,
-    };
-
-    let new_dims = jfa::Dimensions::new(size.width, size.height);
-    let dims = outline.jfa_dims_buffer.get_mut(0);
-    if *dims != new_dims {
-        *dims = new_dims;
-        outline.jfa_dims_buffer.write_buffer(&device, &queue);
-    }
-
-    let stencil_desc = tex_desc(
-        "outline_stencil_output",
-        size,
-        TextureFormat::Depth24PlusStencil8,
-    );
-    outline.stencil_output = textures.get(&device, stencil_desc);
-
-    // The JFA passes ping-pong between the primary and secondary outputs, so
-    // when the primary target is recreated, the secondary bind group is
-    // recreated, and vice-versa.
-
-    let old_jfa_primary = outline.jfa_primary_output.texture.id();
-    let jfa_primary_desc = tex_desc("outline_jfa_primary_output", size, TextureFormat::Rg16Snorm);
-    let jfa_primary_output = textures.get(&device, jfa_primary_desc);
-    if jfa_primary_output.texture.id() != old_jfa_primary {
-        outline.jfa_primary_output = jfa_primary_output;
-        outline.jfa_secondary_bind_group = outline.create_jfa_bind_group(
-            &device,
-            "outline_jfa_secondary_bind_group",
-            &outline.jfa_primary_output.default_view,
-        );
-    }
-
-    let old_jfa_secondary = outline.jfa_secondary_output.texture.id();
-    let jfa_secondary_desc = tex_desc(
-        "outline_jfa_secondary_output",
-        size,
-        TextureFormat::Rg16Snorm,
-    );
-    let jfa_secondary_output = textures.get(&device, jfa_secondary_desc);
-    if jfa_secondary_output.texture.id() != old_jfa_secondary {
-        outline.jfa_secondary_output = jfa_secondary_output;
-        outline.jfa_primary_bind_group = outline.create_jfa_bind_group(
-            &device,
-            "outline_jfa_primary_bind_group",
-            &outline.jfa_secondary_output.default_view,
-        );
-    }
-}
 
 pub const STENCIL_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 10400755559809425757);
@@ -383,6 +66,10 @@ pub const JFA_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 5227804998548228051);
 pub const FULLSCREEN_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 12099561278220359682);
+pub const OUTLINE_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11094028876979933159);
+pub const DIMENSIONS_SHADER_HANDLE: HandleUntyped =
+    HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11721531257850828867);
 
 pub mod node {
     pub const OUTLINE_PASS_DRIVER: &'static str = "outline_pass_driver";
@@ -397,9 +84,20 @@ impl Node for OutlinePassDriverNode {
         _render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), NodeRunError> {
+        let window = world
+            .get_resource::<ExtractedWindows>()
+            .unwrap()
+            .get(&WindowId::primary())
+            .unwrap();
         let extracted_cameras = world.get_resource::<ExtractedCameraNames>().unwrap();
         if let Some(camera_3d) = extracted_cameras.entities.get(CameraPlugin::CAMERA_3D) {
-            graph.run_sub_graph(outline_graph::NAME, vec![SlotValue::Entity(*camera_3d)])?;
+            graph.run_sub_graph(
+                outline_graph::NAME,
+                vec![
+                    SlotValue::Entity(*camera_3d),
+                    SlotValue::TextureView(window.swap_chain_texture.as_ref().unwrap().clone()),
+                ],
+            )?;
         }
 
         Ok(())
@@ -411,12 +109,14 @@ pub mod outline_graph {
 
     pub mod input {
         pub const VIEW_ENTITY: &'static str = "view_entity";
+        pub const TARGET: &'static str = "target";
     }
 
     pub mod node {
         pub const STENCIL_PASS: &'static str = "stencil_pass";
         pub const JFA_INIT_PASS: &'static str = "jfa_init_pass";
         pub const JFA_PASS: &'static str = "jfa_pass";
+        pub const OUTLINE_PASS: &'static str = "outline_pass";
     }
 }
 
@@ -432,6 +132,11 @@ impl Plugin for OutlinePlugin {
         let fullscreen_shader = Shader::from_wgsl(include_str!("shaders/fullscreen.wgsl"))
             .with_import_path("outline::fullscreen");
         shaders.set_untracked(FULLSCREEN_SHADER_HANDLE, fullscreen_shader);
+        let outline_shader = Shader::from_wgsl(include_str!("shaders/outline.wgsl"));
+        shaders.set_untracked(OUTLINE_SHADER_HANDLE, outline_shader);
+        let dimensions_shader = Shader::from_wgsl(include_str!("shaders/dimensions.wgsl"))
+            .with_import_path("outline::dimensions");
+        shaders.set_untracked(DIMENSIONS_SHADER_HANDLE, dimensions_shader);
 
         // TODO:
         // - extract outline components
@@ -442,22 +147,30 @@ impl Plugin for OutlinePlugin {
                 .init_resource::<DrawFunctions<MeshStencil>>()
                 .add_render_command::<MeshStencil, SetItemPipeline>()
                 .add_render_command::<MeshStencil, DrawMeshStencil>()
-                .init_resource::<OutlineResources>()
+                .init_resource::<resources::OutlineResources>()
                 .init_resource::<stencil::MeshStencilPipeline>()
                 .init_resource::<SpecializedPipelines<stencil::MeshStencilPipeline>>()
                 .init_resource::<jfa_init::JfaInitPipeline>()
                 .init_resource::<jfa::JfaPipeline>()
+                .init_resource::<outline::OutlinePipeline>()
+                .init_resource::<SpecializedPipelines<outline::OutlinePipeline>>()
                 .add_system_to_stage(RenderStage::Extract, extract_outlines)
                 .add_system_to_stage(RenderStage::Extract, extract_stencil_camera_phase)
-                .add_system_to_stage(RenderStage::Prepare, recreate_outline_resources)
+                .add_system_to_stage(RenderStage::Prepare, resources::recreate_outline_resources)
                 .add_system_to_stage(RenderStage::Queue, queue_mesh_stencils);
 
             let mut outline_graph = RenderGraph::default();
             let stencil_node = MeshStencilNode::new(&mut render_app.world);
-            let input_node_id = outline_graph.set_input(vec![SlotInfo::new(
-                outline_graph::input::VIEW_ENTITY,
-                SlotType::Entity,
-            )]);
+            // TODO: BevyDefault for surface texture format is an anti-pattern;
+            // the target texture format should be queried from the window when
+            // Bevy exposes that functionality.
+            let outline_node =
+                OutlineNode::new(&mut render_app.world, TextureFormat::bevy_default());
+
+            let input_node_id = outline_graph.set_input(vec![
+                SlotInfo::new(outline_graph::input::VIEW_ENTITY, SlotType::Entity),
+                SlotInfo::new(outline_graph::input::TARGET, SlotType::TextureView),
+            ]);
             outline_graph.add_node(outline_graph::node::STENCIL_PASS, stencil_node);
             outline_graph
                 .add_slot_edge(
@@ -485,12 +198,32 @@ impl Plugin for OutlinePlugin {
                     JfaNode::IN_BASE,
                 )
                 .unwrap();
+            outline_graph.add_node(outline_graph::node::OUTLINE_PASS, outline_node);
+            outline_graph
+                .add_slot_edge(
+                    outline_graph::node::JFA_PASS,
+                    JfaNode::OUT_JUMP,
+                    outline_graph::node::OUTLINE_PASS,
+                    OutlineNode::IN_JFA,
+                )
+                .unwrap();
+            outline_graph
+                .add_slot_edge(
+                    input_node_id,
+                    outline_graph::input::TARGET,
+                    outline_graph::node::OUTLINE_PASS,
+                    OutlineNode::IN_TARGET,
+                )
+                .unwrap();
 
             let mut root_graph = render_app.world.get_resource_mut::<RenderGraph>().unwrap();
             root_graph.add_sub_graph(outline_graph::NAME, outline_graph);
             root_graph.add_node(node::OUTLINE_PASS_DRIVER, OutlinePassDriverNode);
             root_graph
                 .add_node_edge(MAIN_PASS_DEPENDENCIES, node::OUTLINE_PASS_DRIVER)
+                .unwrap();
+            root_graph
+                .add_node_edge(MAIN_PASS_DRIVER, node::OUTLINE_PASS_DRIVER)
                 .unwrap();
         }
     }

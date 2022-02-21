@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use outline::{Outline, OutlinePlugin};
+use bevy_jfa::{Outline, OutlinePlugin};
 
 fn setup(
     mut commands: Commands,
@@ -24,7 +24,7 @@ fn setup(
         });
 
     commands.spawn_bundle(PerspectiveCameraBundle {
-        transform: Transform::from_xyz(3.0, 3.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+        transform: Transform::from_xyz(3.0, 2.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..PerspectiveCameraBundle::new_3d()
     });
 
@@ -36,9 +36,17 @@ fn setup(
             radius: 0.0,
             ..Default::default()
         },
-        transform: Transform::from_xyz(8.0, 3.0, 1.0),
+        transform: Transform::from_xyz(6.0, 3.0, 1.0),
         ..Default::default()
     });
+}
+
+fn rotate_cube(time: Res<Time>, mut query: Query<&mut Transform, With<Outline>>) {
+    let delta = time.delta_seconds();
+
+    for mut xform in query.iter_mut() {
+        xform.rotate(Quat::from_rotation_y(delta));
+    }
 }
 
 fn main() {
@@ -46,5 +54,6 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugin(OutlinePlugin)
         .add_startup_system(setup)
+        .add_system(rotate_cube)
         .run();
 }

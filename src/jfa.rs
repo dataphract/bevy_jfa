@@ -13,9 +13,9 @@ use bevy::{
     },
 };
 
-use crate::{OutlineResources, JFA_SHADER_HANDLE};
-
-pub const TEXTURE_FORMAT: TextureFormat = TextureFormat::Rg16Snorm;
+use crate::{
+    resources::OutlineResources, FULLSCREEN_PRIMITIVE_STATE, JFA_SHADER_HANDLE, JFA_TEXTURE_FORMAT,
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, AsStd140)]
 pub struct JumpDist {
@@ -24,6 +24,8 @@ pub struct JumpDist {
 
 #[derive(Copy, Clone, Debug, PartialEq, AsStd140)]
 pub struct Dimensions {
+    width: f32,
+    height: f32,
     inv_width: f32,
     inv_height: f32,
 }
@@ -31,6 +33,8 @@ pub struct Dimensions {
 impl Dimensions {
     pub fn new(width: u32, height: u32) -> Dimensions {
         Dimensions {
+            width: width as f32,
+            height: height as f32,
             inv_width: 1.0 / width as f32,
             inv_height: 1.0 / height as f32,
         }
@@ -44,11 +48,12 @@ pub struct JfaPipeline {
 impl FromWorld for JfaPipeline {
     fn from_world(world: &mut World) -> Self {
         let res = world.get_resource::<OutlineResources>().unwrap();
+        let dimensions_bind_group_layout = res.dimensions_bind_group_layout.clone();
         let jfa_bind_group_layout = res.jfa_bind_group_layout.clone();
         let mut pipeline_cache = world.get_resource_mut::<RenderPipelineCache>().unwrap();
         let cached = pipeline_cache.queue(RenderPipelineDescriptor {
             label: Some("outline_jfa_pipeline".into()),
-            layout: Some(vec![jfa_bind_group_layout]),
+            layout: Some(vec![dimensions_bind_group_layout, jfa_bind_group_layout]),
             vertex: VertexState {
                 shader: JFA_SHADER_HANDLE.typed::<Shader>(),
                 shader_defs: vec![],
@@ -60,20 +65,12 @@ impl FromWorld for JfaPipeline {
                 shader_defs: vec![],
                 entry_point: "fragment".into(),
                 targets: vec![ColorTargetState {
-                    format: TEXTURE_FORMAT,
+                    format: JFA_TEXTURE_FORMAT,
                     blend: None,
                     write_mask: ColorWrites::ALL,
                 }],
             }),
-            primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: FrontFace::Ccw,
-                cull_mode: Some(Face::Back),
-                unclipped_depth: false,
-                polygon_mode: PolygonMode::Fill,
-                conservative: false,
-            },
+            primitive: FULLSCREEN_PRIMITIVE_STATE,
             depth_stencil: None,
             multisample: MultisampleState::default(),
         });
@@ -122,7 +119,7 @@ impl Node for JfaNode {
             }
         };
 
-        let max_exp = 9;
+        let max_exp = 10;
         for it in 0..=max_exp {
             let exp = max_exp - it;
 
@@ -155,7 +152,8 @@ impl Node for JfaNode {
                     });
             let mut tracked_pass = TrackedRenderPass::new(render_pass);
             tracked_pass.set_render_pipeline(&cached_pipeline);
-            tracked_pass.set_bind_group(0, src, &[res.jfa_distance_offsets[exp]]);
+            tracked_pass.set_bind_group(0, &res.dimensions_bind_group, &[]);
+            tracked_pass.set_bind_group(1, src, &[res.jfa_distance_offsets[exp]]);
             tracked_pass.draw(0..3, 0..1);
         }
 

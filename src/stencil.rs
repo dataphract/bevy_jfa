@@ -13,7 +13,7 @@ use bevy::{
     },
 };
 
-use crate::{MeshStencil, OutlineResources, STENCIL_SHADER_HANDLE};
+use crate::{resources::OutlineResources, MeshStencil, STENCIL_SHADER_HANDLE};
 
 pub struct MeshStencilPipeline {
     mesh_pipeline: MeshPipeline,
@@ -70,12 +70,19 @@ impl SpecializedPipeline for MeshStencilPipeline {
     }
 }
 
+/// Render graph node for producing stencils from meshes.
 pub struct MeshStencilNode {
     query: QueryState<&'static RenderPhase<MeshStencil>>,
 }
 
 impl MeshStencilNode {
     pub const IN_VIEW: &'static str = "view";
+
+    /// The produced stencil buffer.
+    ///
+    /// This has format `TextureFormat::Depth24PlusStencil8`. Fragments covered
+    /// by a mesh are assigned a value of 255. All other fragments are assigned
+    /// a value of 0. The depth aspect is unused.
     pub const OUT_STENCIL: &'static str = "stencil";
 
     pub fn new(world: &mut World) -> MeshStencilNode {
