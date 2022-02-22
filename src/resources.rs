@@ -2,10 +2,9 @@ use bevy::{
     prelude::*,
     render::{
         render_resource::{
-            std140::{AsStd140, DynamicUniform, Std140},
-            AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
-            BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType,
-            BufferBinding, BufferBindingType, BufferSize, DynamicUniformVec, Extent3d, FilterMode,
+            std140::AsStd140, AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry,
+            BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource,
+            BindingType, BufferBindingType, BufferSize, DynamicUniformVec, Extent3d, FilterMode,
             Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages, TextureDescriptor,
             TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
             TextureViewDimension, UniformVec,

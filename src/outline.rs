@@ -156,13 +156,9 @@ impl OutlineNode {
             let mut spec = world
                 .get_resource_mut::<SpecializedPipelines<OutlinePipeline>>()
                 .unwrap();
-            spec.specialize(
-                &mut cache,
-                &base,
-                OutlinePipelineKey {
-                    format: target_format,
-                },
-            )
+            let key =
+                OutlinePipelineKey::new(target_format).expect("invalid format for OutlineNode");
+            spec.specialize(&mut cache, &base, key)
         });
 
         OutlineNode { pipeline_id }

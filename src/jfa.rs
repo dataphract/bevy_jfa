@@ -4,10 +4,10 @@ use bevy::{
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_phase::TrackedRenderPass,
         render_resource::{
-            std140::AsStd140, BindGroup, CachedPipelineId, ColorTargetState, ColorWrites, Face,
-            FragmentState, FrontFace, LoadOp, MultisampleState, Operations, PolygonMode,
-            PrimitiveState, PrimitiveTopology, RenderPassColorAttachment, RenderPassDescriptor,
-            RenderPipelineCache, RenderPipelineDescriptor, TextureFormat, TextureView, VertexState,
+            std140::AsStd140, BindGroup, CachedPipelineId, ColorTargetState, ColorWrites,
+            FragmentState, LoadOp, MultisampleState, Operations, RenderPassColorAttachment,
+            RenderPassDescriptor, RenderPipelineCache, RenderPipelineDescriptor, TextureView,
+            VertexState,
         },
         renderer::RenderContext,
     },
@@ -119,7 +119,7 @@ impl Node for JfaNode {
             }
         };
 
-        let max_exp = 10;
+        let max_exp = 6;
         for it in 0..=max_exp {
             let exp = max_exp - it;
 
