@@ -1,16 +1,20 @@
 use bevy::{
     prelude::*,
     render::{
+        camera::ExtractedCamera,
+        render_asset::RenderAssets,
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_phase::TrackedRenderPass,
         render_resource::{
-            std140::AsStd140, BindGroupLayout, BlendComponent, BlendFactor, BlendOperation,
-            BlendState, CachedPipelineId, ColorTargetState, ColorWrites, FragmentState, LoadOp,
-            MultisampleState, Operations, RenderPassColorAttachment, RenderPassDescriptor,
-            RenderPipelineCache, RenderPipelineDescriptor, SpecializedPipeline,
-            SpecializedPipelines, TextureFormat, TextureSampleType, TextureUsages, VertexState,
+            BindGroupLayout, BlendComponent, BlendFactor, BlendOperation, BlendState,
+            CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState, LoadOp,
+            MultisampleState, Operations, PipelineCache, RenderPassColorAttachment,
+            RenderPassDescriptor, RenderPipelineDescriptor, ShaderType, SpecializedRenderPipeline,
+            SpecializedRenderPipelines, TextureFormat, TextureSampleType, TextureUsages,
+            VertexState,
         },
         renderer::RenderContext,
+        view::ExtractedWindows,
     },
 };
 
@@ -19,7 +23,7 @@ use crate::{
     FULLSCREEN_PRIMITIVE_STATE, OUTLINE_SHADER_HANDLE,
 };
 
-#[derive(Clone, Debug, Default, PartialEq, AsStd140)]
+#[derive(Clone, Debug, Default, PartialEq, ShaderType)]
 pub struct OutlineParams {
     // Outline color.
     color: Vec4,
@@ -90,7 +94,7 @@ impl OutlinePipelineKey {
     }
 }
 
-impl SpecializedPipeline for OutlinePipeline {
+impl SpecializedRenderPipeline for OutlinePipeline {
     type Key = OutlinePipelineKey;
 
     fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
@@ -141,27 +145,29 @@ impl SpecializedPipeline for OutlinePipeline {
 }
 
 pub struct OutlineNode {
-    pipeline_id: CachedPipelineId,
+    pipeline_id: CachedRenderPipelineId,
+    query: QueryState<&'static ExtractedCamera>,
 }
 
 impl OutlineNode {
-    /// Render target on which the outline should be applied.
-    pub const IN_TARGET: &'static str = "in_target";
+    pub const IN_VIEW: &'static str = "in_view";
     pub const IN_JFA: &'static str = "in_jfa";
-    pub const OUT_TARGET: &'static str = "out_target";
+    pub const OUT_VIEW: &'static str = "out_view";
 
     pub fn new(world: &mut World, target_format: TextureFormat) -> OutlineNode {
-        let pipeline_id = world.resource_scope(|world, mut cache: Mut<RenderPipelineCache>| {
+        let pipeline_id = world.resource_scope(|world, mut cache: Mut<PipelineCache>| {
             let base = world.get_resource::<OutlinePipeline>().unwrap().clone();
             let mut spec = world
-                .get_resource_mut::<SpecializedPipelines<OutlinePipeline>>()
+                .get_resource_mut::<SpecializedRenderPipelines<OutlinePipeline>>()
                 .unwrap();
             let key =
                 OutlinePipelineKey::new(target_format).expect("invalid format for OutlineNode");
             spec.specialize(&mut cache, &base, key)
         });
 
-        OutlineNode { pipeline_id }
+        let query = QueryState::new(world);
+
+        OutlineNode { pipeline_id, query }
     }
 }
 
@@ -173,17 +179,21 @@ impl Node for OutlineNode {
                 slot_type: SlotType::TextureView,
             },
             SlotInfo {
-                name: Self::IN_TARGET.into(),
-                slot_type: SlotType::TextureView,
+                name: Self::IN_VIEW.into(),
+                slot_type: SlotType::Entity,
             },
         ]
     }
 
     fn output(&self) -> Vec<SlotInfo> {
         vec![SlotInfo {
-            name: Self::OUT_TARGET.into(),
-            slot_type: SlotType::TextureView,
+            name: Self::OUT_VIEW.into(),
+            slot_type: SlotType::Entity,
         }]
+    }
+
+    fn update(&mut self, world: &mut World) {
+        self.query.update_archetypes(world)
     }
 
     fn run(
@@ -192,13 +202,19 @@ impl Node for OutlineNode {
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), NodeRunError> {
-        let target = graph.get_input_texture(Self::IN_TARGET)?.clone();
-        graph.set_output(Self::OUT_TARGET, target.clone())?;
+        let camera = graph.get_input_entity(Self::IN_VIEW)?.clone();
+        let target = &self.query.get_manual(world, camera).unwrap().target;
+
+        let windows = world.resource::<ExtractedWindows>();
+        let images = world.resource::<RenderAssets<Image>>();
+        let target_view = target.get_texture_view(windows, images).unwrap();
+
+        graph.set_output(Self::OUT_VIEW, camera)?;
 
         let res = world.get_resource::<OutlineResources>().unwrap();
 
-        let pipelines = world.get_resource::<RenderPipelineCache>().unwrap();
-        let pipeline = match pipelines.get(self.pipeline_id) {
+        let pipelines = world.get_resource::<PipelineCache>().unwrap();
+        let pipeline = match pipelines.get_render_pipeline(self.pipeline_id) {
             Some(p) => p,
             None => return Ok(()),
         };
@@ -208,7 +224,7 @@ impl Node for OutlineNode {
             .begin_render_pass(&RenderPassDescriptor {
                 label: Some("jfa_outline"),
                 color_attachments: &[RenderPassColorAttachment {
-                    view: &target,
+                    view: target_view,
                     resolve_target: None,
                     ops: Operations {
                         load: LoadOp::Load,

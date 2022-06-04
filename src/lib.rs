@@ -7,31 +7,26 @@
 use bevy::{
     app::prelude::*,
     asset::{Assets, Handle, HandleUntyped},
-    core::FloatOrd,
-    core_pipeline::node::{MAIN_PASS_DEPENDENCIES, MAIN_PASS_DRIVER},
     ecs::prelude::*,
     math::prelude::*,
     pbr::{DrawMesh, MeshPipelineKey, MeshUniform, SetMeshBindGroup, SetMeshViewBindGroup},
+    prelude::Camera3d,
     reflect::TypeUuid,
     render::{
-        camera::{ActiveCameras, CameraPlugin, ExtractedCameraNames},
         prelude::*,
         render_asset::RenderAssets,
-        render_graph::{
-            Node, NodeRunError, RenderGraph, RenderGraphContext, SlotInfo, SlotType, SlotValue,
-        },
+        render_graph::RenderGraph,
         render_phase::{
-            AddRenderCommand, CachedPipelinePhaseItem, DrawFunctionId, DrawFunctions,
+            AddRenderCommand, CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions,
             EntityPhaseItem, PhaseItem, RenderPhase, SetItemPipeline,
         },
-        render_resource::{std140::AsStd140, *},
-        renderer::RenderContext,
+        render_resource::{ShaderType, *},
         texture::BevyDefault,
-        view::{ExtractedView, ExtractedWindows, VisibleEntities},
+        view::{ExtractedView, VisibleEntities},
         RenderApp, RenderStage,
     },
     transform::components::GlobalTransform,
-    window::WindowId,
+    utils::FloatOrd,
 };
 use jfa::JfaNode;
 use jfa_init::JfaInitNode;
@@ -71,45 +66,11 @@ pub const OUTLINE_SHADER_HANDLE: HandleUntyped =
 pub const DIMENSIONS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11721531257850828867);
 
-pub mod node {
-    pub const OUTLINE_PASS_DRIVER: &'static str = "outline_pass_driver";
-}
-
-pub struct OutlinePassDriverNode;
-
-impl Node for OutlinePassDriverNode {
-    fn run(
-        &self,
-        graph: &mut RenderGraphContext,
-        _render_context: &mut RenderContext,
-        world: &World,
-    ) -> Result<(), NodeRunError> {
-        let window = world
-            .get_resource::<ExtractedWindows>()
-            .unwrap()
-            .get(&WindowId::primary())
-            .unwrap();
-        let extracted_cameras = world.get_resource::<ExtractedCameraNames>().unwrap();
-        if let Some(camera_3d) = extracted_cameras.entities.get(CameraPlugin::CAMERA_3D) {
-            graph.run_sub_graph(
-                outline_graph::NAME,
-                vec![
-                    SlotValue::Entity(*camera_3d),
-                    SlotValue::TextureView(window.swap_chain_texture.as_ref().unwrap().clone()),
-                ],
-            )?;
-        }
-
-        Ok(())
-    }
-}
-
 pub mod outline_graph {
     pub const NAME: &'static str = "outline_graph";
 
     pub mod input {
         pub const VIEW_ENTITY: &'static str = "view_entity";
-        pub const TARGET: &'static str = "target";
     }
 
     pub mod node {
@@ -138,100 +99,89 @@ impl Plugin for OutlinePlugin {
             .with_import_path("outline::dimensions");
         shaders.set_untracked(DIMENSIONS_SHADER_HANDLE, dimensions_shader);
 
-        // TODO:
-        // - extract outline components
-        // - queue meshes
+        let render_app = match app.get_sub_app_mut(RenderApp) {
+            Ok(r) => r,
+            Err(_) => return,
+        };
 
-        if let Ok(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app
-                .init_resource::<DrawFunctions<MeshStencil>>()
-                .add_render_command::<MeshStencil, SetItemPipeline>()
-                .add_render_command::<MeshStencil, DrawMeshStencil>()
-                .init_resource::<resources::OutlineResources>()
-                .init_resource::<stencil::MeshStencilPipeline>()
-                .init_resource::<SpecializedPipelines<stencil::MeshStencilPipeline>>()
-                .init_resource::<jfa_init::JfaInitPipeline>()
-                .init_resource::<jfa::JfaPipeline>()
-                .init_resource::<outline::OutlinePipeline>()
-                .init_resource::<SpecializedPipelines<outline::OutlinePipeline>>()
-                .add_system_to_stage(RenderStage::Extract, extract_outlines)
-                .add_system_to_stage(RenderStage::Extract, extract_stencil_camera_phase)
-                .add_system_to_stage(RenderStage::Prepare, resources::recreate_outline_resources)
-                .add_system_to_stage(RenderStage::Queue, queue_mesh_stencils);
+        render_app
+            .init_resource::<DrawFunctions<MeshStencil>>()
+            .add_render_command::<MeshStencil, SetItemPipeline>()
+            .add_render_command::<MeshStencil, DrawMeshStencil>()
+            .init_resource::<resources::OutlineResources>()
+            .init_resource::<stencil::MeshStencilPipeline>()
+            .init_resource::<SpecializedMeshPipelines<stencil::MeshStencilPipeline>>()
+            .init_resource::<jfa_init::JfaInitPipeline>()
+            .init_resource::<jfa::JfaPipeline>()
+            .init_resource::<outline::OutlinePipeline>()
+            .init_resource::<SpecializedRenderPipelines<outline::OutlinePipeline>>()
+            .add_system_to_stage(RenderStage::Extract, extract_outlines)
+            .add_system_to_stage(RenderStage::Extract, extract_stencil_camera_phase)
+            .add_system_to_stage(RenderStage::Prepare, resources::recreate_outline_resources)
+            .add_system_to_stage(RenderStage::Queue, queue_mesh_stencils);
 
-            let mut outline_graph = RenderGraph::default();
-            let stencil_node = MeshStencilNode::new(&mut render_app.world);
-            // TODO: BevyDefault for surface texture format is an anti-pattern;
-            // the target texture format should be queried from the window when
-            // Bevy exposes that functionality.
-            let outline_node =
-                OutlineNode::new(&mut render_app.world, TextureFormat::bevy_default());
+        let stencil_node = MeshStencilNode::new(&mut render_app.world);
+        // TODO: BevyDefault for surface texture format is an anti-pattern;
+        // the target texture format should be queried from the window when
+        // Bevy exposes that functionality.
+        let outline_node = OutlineNode::new(&mut render_app.world, TextureFormat::bevy_default());
 
-            let input_node_id = outline_graph.set_input(vec![
-                SlotInfo::new(outline_graph::input::VIEW_ENTITY, SlotType::Entity),
-                SlotInfo::new(outline_graph::input::TARGET, SlotType::TextureView),
-            ]);
-            outline_graph.add_node(outline_graph::node::STENCIL_PASS, stencil_node);
-            outline_graph
-                .add_slot_edge(
-                    input_node_id,
-                    outline_graph::input::VIEW_ENTITY,
-                    outline_graph::node::STENCIL_PASS,
-                    MeshStencilNode::IN_VIEW,
-                )
-                .unwrap();
-            outline_graph.add_node(outline_graph::node::JFA_INIT_PASS, JfaInitNode);
-            outline_graph
-                .add_slot_edge(
-                    outline_graph::node::STENCIL_PASS,
-                    MeshStencilNode::OUT_STENCIL,
-                    outline_graph::node::JFA_INIT_PASS,
-                    JfaInitNode::IN_STENCIL,
-                )
-                .unwrap();
-            outline_graph.add_node(outline_graph::node::JFA_PASS, JfaNode);
-            outline_graph
-                .add_slot_edge(
-                    outline_graph::node::JFA_INIT_PASS,
-                    JfaInitNode::OUT_JFA_INIT,
-                    outline_graph::node::JFA_PASS,
-                    JfaNode::IN_BASE,
-                )
-                .unwrap();
-            outline_graph.add_node(outline_graph::node::OUTLINE_PASS, outline_node);
-            outline_graph
-                .add_slot_edge(
-                    outline_graph::node::JFA_PASS,
-                    JfaNode::OUT_JUMP,
-                    outline_graph::node::OUTLINE_PASS,
-                    OutlineNode::IN_JFA,
-                )
-                .unwrap();
-            outline_graph
-                .add_slot_edge(
-                    input_node_id,
-                    outline_graph::input::TARGET,
-                    outline_graph::node::OUTLINE_PASS,
-                    OutlineNode::IN_TARGET,
-                )
-                .unwrap();
+        let mut root_graph = render_app.world.resource_mut::<RenderGraph>();
+        let draw_3d_graph = root_graph
+            .get_sub_graph_mut(bevy::core_pipeline::core_3d::graph::NAME)
+            .unwrap();
 
-            let mut root_graph = render_app.world.get_resource_mut::<RenderGraph>().unwrap();
-            root_graph.add_sub_graph(outline_graph::NAME, outline_graph);
-            root_graph.add_node(node::OUTLINE_PASS_DRIVER, OutlinePassDriverNode);
-            root_graph
-                .add_node_edge(MAIN_PASS_DEPENDENCIES, node::OUTLINE_PASS_DRIVER)
-                .unwrap();
-            root_graph
-                .add_node_edge(MAIN_PASS_DRIVER, node::OUTLINE_PASS_DRIVER)
-                .unwrap();
-        }
+        let input_node_id = draw_3d_graph.input_node().unwrap().id;
+        draw_3d_graph.add_node(outline_graph::node::STENCIL_PASS, stencil_node);
+        draw_3d_graph
+            .add_slot_edge(
+                input_node_id,
+                outline_graph::input::VIEW_ENTITY,
+                outline_graph::node::STENCIL_PASS,
+                MeshStencilNode::IN_VIEW,
+            )
+            .unwrap();
+        draw_3d_graph.add_node(outline_graph::node::JFA_INIT_PASS, JfaInitNode);
+        draw_3d_graph
+            .add_slot_edge(
+                outline_graph::node::STENCIL_PASS,
+                MeshStencilNode::OUT_STENCIL,
+                outline_graph::node::JFA_INIT_PASS,
+                JfaInitNode::IN_STENCIL,
+            )
+            .unwrap();
+        draw_3d_graph.add_node(outline_graph::node::JFA_PASS, JfaNode);
+        draw_3d_graph
+            .add_slot_edge(
+                outline_graph::node::JFA_INIT_PASS,
+                JfaInitNode::OUT_JFA_INIT,
+                outline_graph::node::JFA_PASS,
+                JfaNode::IN_BASE,
+            )
+            .unwrap();
+        draw_3d_graph.add_node(outline_graph::node::OUTLINE_PASS, outline_node);
+        draw_3d_graph
+            .add_slot_edge(
+                input_node_id,
+                outline_graph::input::VIEW_ENTITY,
+                outline_graph::node::OUTLINE_PASS,
+                OutlineNode::IN_VIEW,
+            )
+            .unwrap();
+        draw_3d_graph
+            .add_slot_edge(
+                outline_graph::node::JFA_PASS,
+                JfaNode::OUT_JUMP,
+                outline_graph::node::OUTLINE_PASS,
+                OutlineNode::IN_JFA,
+            )
+            .unwrap();
     }
 }
 
 pub struct MeshStencil {
     distance: f32,
-    pipeline: CachedPipelineId,
+    pipeline: CachedRenderPipelineId,
     entity: Entity,
     draw_function: DrawFunctionId,
 }
@@ -254,8 +204,8 @@ impl EntityPhaseItem for MeshStencil {
     }
 }
 
-impl CachedPipelinePhaseItem for MeshStencil {
-    fn cached_pipeline(&self) -> CachedPipelineId {
+impl CachedRenderPipelinePhaseItem for MeshStencil {
+    fn cached_pipeline(&self) -> CachedRenderPipelineId {
         self.pipeline
     }
 }
@@ -267,6 +217,12 @@ type DrawMeshStencil = (
     DrawMesh,
 );
 
+/// Component for enabling outlines when rendering with a given camera.
+#[derive(Clone, Debug, PartialEq, Component)]
+pub struct CameraOutline {
+    pub enabled: bool,
+}
+
 /// Component for entities that should be outlined.
 #[derive(Clone, Debug, PartialEq, Component)]
 pub struct Outline {
@@ -275,7 +231,7 @@ pub struct Outline {
     pub color: Color,
 }
 
-#[derive(AsStd140, Clone, Component)]
+#[derive(ShaderType, Clone, Component)]
 pub struct OutlineUniform {
     pub color: Vec4,
     pub width: u32,
@@ -302,23 +258,24 @@ pub fn extract_outlines(
     commands.insert_or_spawn_batch(batches);
 }
 
-pub fn extract_stencil_camera_phase(mut commands: Commands, active_cameras: Res<ActiveCameras>) {
-    if let Some(camera_3d) = active_cameras.get(CameraPlugin::CAMERA_3D) {
-        if let Some(entity) = camera_3d.entity {
-            commands
-                .get_or_spawn(entity)
-                .insert(RenderPhase::<MeshStencil>::default());
-        }
+pub fn extract_stencil_camera_phase(
+    mut commands: Commands,
+    cameras: Query<Entity, (With<Camera3d>, With<CameraOutline>)>,
+) {
+    for entity in cameras.iter() {
+        commands
+            .get_or_spawn(entity)
+            .insert(RenderPhase::<MeshStencil>::default());
     }
 }
 
 pub fn queue_mesh_stencils(
     mesh_stencil_draw_functions: Res<DrawFunctions<MeshStencil>>,
     mesh_stencil_pipeline: Res<MeshStencilPipeline>,
-    mut pipelines: ResMut<SpecializedPipelines<MeshStencilPipeline>>,
-    mut pipeline_cache: ResMut<RenderPipelineCache>,
+    mut pipelines: ResMut<SpecializedMeshPipelines<MeshStencilPipeline>>,
+    mut pipeline_cache: ResMut<PipelineCache>,
     render_meshes: Res<RenderAssets<Mesh>>,
-    outline_meshes: Query<(Entity, &Handle<Mesh>, &MeshUniform, &OutlineUniform)>,
+    outline_meshes: Query<(Entity, &Handle<Mesh>, &MeshUniform)>,
     mut views: Query<(
         &ExtractedView,
         &mut VisibleEntities,
@@ -335,38 +292,33 @@ pub fn queue_mesh_stencils(
         let inv_view_row_2 = view_matrix.inverse().row(2);
 
         for visible_entity in visible_entities.entities.iter().copied() {
-            if let Ok((entity, mesh_handle, mesh_uniform, outline_uniform)) =
-                outline_meshes.get(visible_entity)
-            {
-                if let Some(mesh) = render_meshes.get(mesh_handle) {
-                    let key = {
-                        let mut k =
-                            MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
-                        if mesh.has_tangents {
-                            k |= MeshPipelineKey::VERTEX_TANGENTS;
-                        }
-                        k
-                    };
+            let (entity, mesh_handle, mesh_uniform) = match outline_meshes.get(visible_entity) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
 
-                    let pipeline =
-                        pipelines.specialize(&mut pipeline_cache, &mesh_stencil_pipeline, key);
-                    mesh_stencil_phase.add(MeshStencil {
-                        entity,
-                        pipeline,
-                        draw_function: draw_outline,
-                        distance: inv_view_row_2.dot(mesh_uniform.transform.col(3)),
-                    });
-                }
-            }
+            let mesh = match render_meshes.get(mesh_handle) {
+                Some(m) => m,
+                None => continue,
+            };
+
+            let key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
+
+            let pipeline = pipelines
+                .specialize(
+                    &mut pipeline_cache,
+                    &mesh_stencil_pipeline,
+                    key,
+                    &mesh.layout,
+                )
+                .unwrap();
+
+            mesh_stencil_phase.add(MeshStencil {
+                entity,
+                pipeline,
+                draw_function: draw_outline,
+                distance: inv_view_row_2.dot(mesh_uniform.transform.col(3)),
+            });
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
     }
 }

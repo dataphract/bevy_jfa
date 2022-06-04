@@ -2,12 +2,12 @@ use bevy::{
     prelude::*,
     render::{
         render_resource::{
-            std140::AsStd140, AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry,
-            BindGroupLayout, BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource,
-            BindingType, BufferBindingType, BufferSize, DynamicUniformVec, Extent3d, FilterMode,
-            Sampler, SamplerBindingType, SamplerDescriptor, ShaderStages, TextureDescriptor,
+            AddressMode, BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
+            BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingResource, BindingType,
+            BufferBindingType, DynamicUniformBuffer, Extent3d, FilterMode, Sampler,
+            SamplerBindingType, SamplerDescriptor, ShaderStages, ShaderType, TextureDescriptor,
             TextureDimension, TextureFormat, TextureSampleType, TextureUsages, TextureView,
-            TextureViewDimension, UniformVec,
+            TextureViewDimension, UniformBuffer,
         },
         renderer::{RenderDevice, RenderQueue},
         texture::{CachedTexture, TextureCache},
@@ -23,14 +23,14 @@ pub struct OutlineResources {
     pub stencil_output: CachedTexture,
 
     pub dimensions_bind_group_layout: BindGroupLayout,
-    pub dimensions_buffer: UniformVec<jfa::Dimensions>,
+    pub dimensions_buffer: UniformBuffer<jfa::Dimensions>,
     pub dimensions_bind_group: BindGroup,
 
     pub sampler: Sampler,
     pub jfa_bind_group_layout: BindGroupLayout,
     // Dynamic uniform buffer containing power-of-two JFA distances from 1 to 32768.
     // TODO: use instance ID instead?
-    pub jfa_distance_buffer: DynamicUniformVec<jfa::JumpDist>,
+    pub jfa_distance_buffer: DynamicUniformBuffer<jfa::JumpDist>,
     pub jfa_distance_offsets: Vec<u32>,
 
     // Bind group for jump flood passes targeting the primary output.
@@ -43,7 +43,7 @@ pub struct OutlineResources {
     // Secondary jump flood output.
     pub jfa_secondary_output: CachedTexture,
 
-    pub outline_params_buffer: UniformVec<outline::OutlineParams>,
+    pub outline_params_buffer: UniformBuffer<outline::OutlineParams>,
     pub outline_bind_group_layout: BindGroupLayout,
     pub primary_outline_bind_group: BindGroup,
     pub secondary_outline_bind_group: BindGroup,
@@ -143,8 +143,7 @@ impl FromWorld for OutlineResources {
         let stencil_output = textures.get(&device, stencil_desc);
 
         let dims = jfa::Dimensions::new(size.width, size.height);
-        let mut dimensions_buffer = UniformVec::default();
-        dimensions_buffer.push(dims);
+        let mut dimensions_buffer = UniformBuffer::from(dims);
         dimensions_buffer.write_buffer(&device, &queue);
         let dimensions_bind_group_layout =
             device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -155,9 +154,7 @@ impl FromWorld for OutlineResources {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: false,
-                        min_binding_size: BufferSize::new(
-                            jfa::Dimensions::std140_size_static() as u64
-                        ),
+                        min_binding_size: Some(jfa::Dimensions::min_size()),
                     },
                     count: None,
                 }],
@@ -181,9 +178,7 @@ impl FromWorld for OutlineResources {
                     ty: BindingType::Buffer {
                         ty: BufferBindingType::Uniform,
                         has_dynamic_offset: true,
-                        min_binding_size: BufferSize::new(
-                            jfa::JumpDist::std140_size_static() as u64
-                        ),
+                        min_binding_size: Some(jfa::JumpDist::min_size()),
                     },
                     count: None,
                 },
@@ -205,10 +200,10 @@ impl FromWorld for OutlineResources {
                 },
             ],
         });
-        let mut jfa_distance_buffer = DynamicUniformVec::default();
+        let mut jfa_distance_buffer = DynamicUniformBuffer::default();
         let mut jfa_distance_offsets = Vec::new();
         for exp in 0_u32..16 {
-            // TODO: this should be a DynamicUniformVec
+            // TODO: this should be a DynamicUniformBuffer
             let ofs = jfa_distance_buffer.push(jfa::JumpDist {
                 dist: 2_u32.pow(exp),
             });
@@ -252,8 +247,7 @@ impl FromWorld for OutlineResources {
             &sampler,
         );
 
-        let mut outline_params_buffer = UniformVec::default();
-        outline_params_buffer.push(outline::OutlineParams::new(
+        let mut outline_params_buffer = UniformBuffer::from(outline::OutlineParams::new(
             Color::hex("b4a2c8").unwrap(),
             size.width,
             size.height,
@@ -272,9 +266,7 @@ impl FromWorld for OutlineResources {
                         ty: BindingType::Buffer {
                             ty: BufferBindingType::Uniform,
                             has_dynamic_offset: false,
-                            min_binding_size: BufferSize::new(
-                                outline::OutlineParams::std140_size_static() as u64,
-                            ),
+                            min_binding_size: Some(outline::OutlineParams::min_size()),
                         },
                         count: None,
                     },
@@ -352,7 +344,7 @@ pub fn recreate_outline_resources(
     };
 
     let new_dims = jfa::Dimensions::new(size.width, size.height);
-    let dims = outline.dimensions_buffer.get_mut(0);
+    let dims = outline.dimensions_buffer.get_mut();
     if *dims != new_dims {
         *dims = new_dims;
         outline.dimensions_buffer.write_buffer(&device, &queue);
@@ -365,7 +357,7 @@ pub fn recreate_outline_resources(
     );
     outline.stencil_output = textures.get(&device, stencil_desc);
 
-    *outline.outline_params_buffer.get_mut(0) =
+    *outline.outline_params_buffer.get_mut() =
         outline::OutlineParams::new(Color::hex("b4a2c8").unwrap(), size.width, size.height, 32.0);
     outline.outline_params_buffer.write_buffer(&device, &queue);
 

@@ -4,10 +4,9 @@ use bevy::{
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_phase::TrackedRenderPass,
         render_resource::{
-            std140::AsStd140, BindGroup, CachedPipelineId, ColorTargetState, ColorWrites,
-            FragmentState, LoadOp, MultisampleState, Operations, RenderPassColorAttachment,
-            RenderPassDescriptor, RenderPipelineCache, RenderPipelineDescriptor, TextureView,
-            VertexState,
+            BindGroup, CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState,
+            LoadOp, MultisampleState, Operations, PipelineCache, RenderPassColorAttachment,
+            RenderPassDescriptor, RenderPipelineDescriptor, ShaderType, TextureView, VertexState,
         },
         renderer::RenderContext,
     },
@@ -17,12 +16,12 @@ use crate::{
     resources::OutlineResources, FULLSCREEN_PRIMITIVE_STATE, JFA_SHADER_HANDLE, JFA_TEXTURE_FORMAT,
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, AsStd140)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ShaderType)]
 pub struct JumpDist {
     pub dist: u32,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, AsStd140)]
+#[derive(Copy, Clone, Debug, PartialEq, ShaderType)]
 pub struct Dimensions {
     width: f32,
     height: f32,
@@ -42,7 +41,7 @@ impl Dimensions {
 }
 
 pub struct JfaPipeline {
-    cached: CachedPipelineId,
+    cached: CachedRenderPipelineId,
 }
 
 impl FromWorld for JfaPipeline {
@@ -50,8 +49,8 @@ impl FromWorld for JfaPipeline {
         let res = world.get_resource::<OutlineResources>().unwrap();
         let dimensions_bind_group_layout = res.dimensions_bind_group_layout.clone();
         let jfa_bind_group_layout = res.jfa_bind_group_layout.clone();
-        let mut pipeline_cache = world.get_resource_mut::<RenderPipelineCache>().unwrap();
-        let cached = pipeline_cache.queue(RenderPipelineDescriptor {
+        let mut pipeline_cache = world.get_resource_mut::<PipelineCache>().unwrap();
+        let cached = pipeline_cache.queue_render_pipeline(RenderPipelineDescriptor {
             label: Some("outline_jfa_pipeline".into()),
             layout: Some(vec![dimensions_bind_group_layout, jfa_bind_group_layout]),
             vertex: VertexState {
@@ -110,8 +109,8 @@ impl Node for JfaNode {
             .unwrap();
 
         let pipeline = world.get_resource::<JfaPipeline>().unwrap();
-        let pipeline_cache = world.get_resource::<RenderPipelineCache>().unwrap();
-        let cached_pipeline = match pipeline_cache.get(pipeline.cached) {
+        let pipeline_cache = world.get_resource::<PipelineCache>().unwrap();
+        let cached_pipeline = match pipeline_cache.get_render_pipeline(pipeline.cached) {
             Some(c) => c,
             // Still queued.
             None => {

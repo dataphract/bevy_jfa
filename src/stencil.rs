@@ -2,15 +2,18 @@ use bevy::{
     pbr::{MeshPipeline, MeshPipelineKey},
     prelude::*,
     render::{
+        mesh::InnerMeshVertexBufferLayout,
         render_graph::{Node, RenderGraphContext, SlotInfo, SlotType},
         render_phase::{DrawFunctions, PhaseItem, RenderPhase, TrackedRenderPass},
         render_resource::{
             CompareFunction, DepthStencilState, LoadOp, MultisampleState, Operations,
             RenderPassDepthStencilAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
-            SpecializedPipeline, StencilFaceState, StencilOperation, StencilState, TextureFormat,
+            SpecializedMeshPipeline, SpecializedMeshPipelineError, StencilFaceState,
+            StencilOperation, StencilState, TextureFormat,
         },
         renderer::RenderContext,
     },
+    utils::{FixedState, Hashed},
 };
 
 use crate::{resources::OutlineResources, MeshStencil, STENCIL_SHADER_HANDLE};
@@ -27,11 +30,15 @@ impl FromWorld for MeshStencilPipeline {
     }
 }
 
-impl SpecializedPipeline for MeshStencilPipeline {
+impl SpecializedMeshPipeline for MeshStencilPipeline {
     type Key = MeshPipelineKey;
 
-    fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
-        let mut desc = self.mesh_pipeline.specialize(key);
+    fn specialize(
+        &self,
+        key: Self::Key,
+        layout: &Hashed<InnerMeshVertexBufferLayout, FixedState>,
+    ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
+        let mut desc = self.mesh_pipeline.specialize(key, layout)?;
 
         desc.layout = Some(vec![
             self.mesh_pipeline.view_layout.clone(),
@@ -66,7 +73,7 @@ impl SpecializedPipeline for MeshStencilPipeline {
         };
 
         desc.label = Some("mesh_stencil_pipeline".into());
-        desc
+        Ok(desc)
     }
 }
 

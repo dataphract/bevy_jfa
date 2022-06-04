@@ -4,10 +4,10 @@ use bevy::{
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_phase::TrackedRenderPass,
         render_resource::{
-            CachedPipelineId, ColorTargetState, ColorWrites, CompareFunction, DepthBiasState,
+            CachedRenderPipelineId, ColorTargetState, ColorWrites, CompareFunction, DepthBiasState,
             DepthStencilState, Face, FragmentState, FrontFace, LoadOp, MultisampleState,
-            Operations, PolygonMode, PrimitiveState, PrimitiveTopology, RenderPassColorAttachment,
-            RenderPassDepthStencilAttachment, RenderPassDescriptor, RenderPipelineCache,
+            Operations, PipelineCache, PolygonMode, PrimitiveState, PrimitiveTopology,
+            RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPassDescriptor,
             RenderPipelineDescriptor, StencilFaceState, StencilOperation, StencilState,
             TextureFormat, VertexState,
         },
@@ -18,13 +18,13 @@ use bevy::{
 use crate::{resources::OutlineResources, JFA_INIT_SHADER_HANDLE, JFA_TEXTURE_FORMAT};
 
 pub struct JfaInitPipeline {
-    cached: CachedPipelineId,
+    cached: CachedRenderPipelineId,
 }
 
 impl FromWorld for JfaInitPipeline {
     fn from_world(world: &mut World) -> Self {
-        let mut pipeline_cache = world.get_resource_mut::<RenderPipelineCache>().unwrap();
-        let cached = pipeline_cache.queue(RenderPipelineDescriptor {
+        let mut pipeline_cache = world.get_resource_mut::<PipelineCache>().unwrap();
+        let cached = pipeline_cache.queue_render_pipeline(RenderPipelineDescriptor {
             label: Some("outline_jfa_init_pipeline".into()),
             layout: None,
             vertex: VertexState {
@@ -122,8 +122,8 @@ impl Node for JfaInitNode {
         let stencil = graph.get_input_texture(Self::IN_STENCIL).unwrap();
 
         let pipeline = world.get_resource::<JfaInitPipeline>().unwrap();
-        let pipeline_cache = world.get_resource::<RenderPipelineCache>().unwrap();
-        let cached_pipeline = match pipeline_cache.get(pipeline.cached) {
+        let pipeline_cache = world.get_resource::<PipelineCache>().unwrap();
+        let cached_pipeline = match pipeline_cache.get_render_pipeline(pipeline.cached) {
             Some(c) => c,
             // Still queued.
             None => {

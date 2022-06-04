@@ -1,7 +1,7 @@
 // Mask generation shader.
 
-#import bevy_pbr::mesh_view_bind_group
-#import bevy_pbr::mesh_struct
+#import bevy_pbr::mesh_view_bindings
+#import bevy_pbr::mesh_types
 
 [[group(1), binding(0)]]
 var<uniform> mesh: Mesh;

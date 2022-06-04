@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy_jfa::{Outline, OutlinePlugin};
+use bevy_jfa::{CameraOutline, Outline, OutlinePlugin};
 
 fn setup(
     mut commands: Commands,
@@ -23,10 +23,12 @@ fn setup(
             color: Color::AZURE,
         });
 
-    commands.spawn_bundle(PerspectiveCameraBundle {
-        transform: Transform::from_xyz(3.0, 2.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..PerspectiveCameraBundle::new_3d()
-    });
+    commands
+        .spawn_bundle(Camera3dBundle {
+            transform: Transform::from_xyz(3.0, 2.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ..Camera3dBundle::default()
+        })
+        .insert(CameraOutline { enabled: true });
 
     commands.spawn_bundle(PointLightBundle {
         point_light: PointLight {
