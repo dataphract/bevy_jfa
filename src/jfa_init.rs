@@ -4,12 +4,10 @@ use bevy::{
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_phase::TrackedRenderPass,
         render_resource::{
-            CachedRenderPipelineId, ColorTargetState, ColorWrites, CompareFunction, DepthBiasState,
-            DepthStencilState, Face, FragmentState, FrontFace, LoadOp, MultisampleState,
-            Operations, PipelineCache, PolygonMode, PrimitiveState, PrimitiveTopology,
-            RenderPassColorAttachment, RenderPassDepthStencilAttachment, RenderPassDescriptor,
-            RenderPipelineDescriptor, StencilFaceState, StencilOperation, StencilState,
-            TextureFormat, VertexState,
+            CachedRenderPipelineId, ColorTargetState, ColorWrites, Face, FragmentState, FrontFace,
+            LoadOp, MultisampleState, Operations, PipelineCache, PolygonMode, PrimitiveState,
+            PrimitiveTopology, RenderPassColorAttachment, RenderPassDescriptor,
+            RenderPipelineDescriptor, VertexState,
         },
         renderer::RenderContext,
     },
@@ -23,10 +21,14 @@ pub struct JfaInitPipeline {
 
 impl FromWorld for JfaInitPipeline {
     fn from_world(world: &mut World) -> Self {
+        let res = world.resource::<OutlineResources>();
+        let dims_layout = res.dimensions_bind_group_layout.clone();
+        let init_layout = res.jfa_init_bind_group_layout.clone();
+
         let mut pipeline_cache = world.get_resource_mut::<PipelineCache>().unwrap();
         let cached = pipeline_cache.queue_render_pipeline(RenderPipelineDescriptor {
             label: Some("outline_jfa_init_pipeline".into()),
-            layout: None,
+            layout: Some(vec![dims_layout, init_layout]),
             vertex: VertexState {
                 shader: JFA_INIT_SHADER_HANDLE.typed::<Shader>(),
                 shader_defs: vec![],
@@ -42,23 +44,7 @@ impl FromWorld for JfaInitPipeline {
                 polygon_mode: PolygonMode::Fill,
                 conservative: false,
             },
-            depth_stencil: Some(DepthStencilState {
-                format: TextureFormat::Depth24PlusStencil8,
-                depth_write_enabled: false,
-                depth_compare: CompareFunction::Always,
-                stencil: StencilState {
-                    front: StencilFaceState {
-                        compare: CompareFunction::Equal,
-                        fail_op: StencilOperation::Keep,
-                        depth_fail_op: StencilOperation::Keep,
-                        pass_op: StencilOperation::Keep,
-                    },
-                    back: StencilFaceState::IGNORE,
-                    read_mask: !0,
-                    write_mask: 0,
-                },
-                bias: DepthBiasState::default(),
-            }),
+            depth_stencil: None,
             multisample: MultisampleState::default(),
             fragment: Some(FragmentState {
                 shader: JFA_INIT_SHADER_HANDLE.typed::<Shader>(),
@@ -86,7 +72,7 @@ impl JfaInitNode {
     /// Fragments in the JFA initialization pass will pass the stencil test if
     /// the corresponding stencil buffer value is 255, and fail otherwise.
     /// The depth aspect is ignored.
-    pub const IN_STENCIL: &'static str = "in_stencil";
+    pub const IN_MASK: &'static str = "in_stencil";
 
     /// The produced initialized JFA buffer.
     ///
@@ -98,7 +84,7 @@ impl JfaInitNode {
 
 impl Node for JfaInitNode {
     fn input(&self) -> Vec<SlotInfo> {
-        vec![SlotInfo::new(Self::IN_STENCIL, SlotType::TextureView)]
+        vec![SlotInfo::new(Self::IN_MASK, SlotType::TextureView)]
     }
 
     fn output(&self) -> Vec<SlotInfo> {
@@ -118,8 +104,6 @@ impl Node for JfaInitNode {
                 res.jfa_primary_output.default_view.clone(),
             )
             .unwrap();
-
-        let stencil = graph.get_input_texture(Self::IN_STENCIL).unwrap();
 
         let pipeline = world.get_resource::<JfaInitPipeline>().unwrap();
         let pipeline_cache = world.get_resource::<PipelineCache>().unwrap();
@@ -151,18 +135,12 @@ impl Node for JfaInitNode {
                         store: true,
                     },
                 }],
-                depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: stencil,
-                    depth_ops: None,
-                    stencil_ops: Some(Operations {
-                        load: LoadOp::Load,
-                        store: false,
-                    }),
-                }),
+                depth_stencil_attachment: None,
             });
         let mut tracked_pass = TrackedRenderPass::new(render_pass);
         tracked_pass.set_render_pipeline(&cached_pipeline);
-        tracked_pass.set_stencil_reference(!0);
+        tracked_pass.set_bind_group(0, &res.dimensions_bind_group, &[]);
+        tracked_pass.set_bind_group(1, &res.jfa_init_bind_group, &[]);
         tracked_pass.draw(0..3, 0..1);
 
         Ok(())

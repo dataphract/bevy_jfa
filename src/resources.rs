@@ -19,14 +19,19 @@ use bevy::{
 use crate::{jfa, outline, JFA_TEXTURE_FORMAT};
 
 pub struct OutlineResources {
-    // Stencil target for initial stencil pass.
-    pub stencil_output: CachedTexture,
+    // Target for initial mask pass.
+    pub mask_multisample: CachedTexture,
+    pub mask_output: CachedTexture,
 
     pub dimensions_bind_group_layout: BindGroupLayout,
     pub dimensions_buffer: UniformBuffer<jfa::Dimensions>,
     pub dimensions_bind_group: BindGroup,
 
     pub sampler: Sampler,
+
+    pub jfa_init_bind_group_layout: BindGroupLayout,
+    pub jfa_init_bind_group: BindGroup,
+
     pub jfa_bind_group_layout: BindGroupLayout,
     // Dynamic uniform buffer containing power-of-two JFA distances from 1 to 32768.
     // TODO: use instance ID instead?
@@ -135,12 +140,14 @@ impl FromWorld for OutlineResources {
         let queue = world.get_resource::<RenderQueue>().unwrap().clone();
         let mut textures = world.get_resource_mut::<TextureCache>().unwrap();
 
-        let stencil_desc = tex_desc(
-            "outline_stencil_output",
-            size,
-            TextureFormat::Depth24PlusStencil8,
-        );
-        let stencil_output = textures.get(&device, stencil_desc);
+        let mask_output_desc = tex_desc("outline_mask_output", size, TextureFormat::R8Unorm);
+        let mask_multisample_desc = TextureDescriptor {
+            label: Some("outline_mask_multisample"),
+            sample_count: 4,
+            ..mask_output_desc.clone()
+        };
+        let mask_multisample = textures.get(&device, mask_multisample_desc);
+        let mask_output = textures.get(&device, mask_output_desc);
 
         let dims = jfa::Dimensions::new(size.width, size.height);
         let mut dimensions_buffer = UniformBuffer::from(dims);
@@ -167,6 +174,55 @@ impl FromWorld for OutlineResources {
                 binding: 0,
                 resource: dimensions_buffer.binding().unwrap(),
             }],
+        });
+
+        let sampler = device.create_sampler(&SamplerDescriptor {
+            label: Some("outline_jfa_sampler"),
+            address_mode_u: AddressMode::ClampToEdge,
+            address_mode_v: AddressMode::ClampToEdge,
+            address_mode_w: AddressMode::ClampToEdge,
+            mag_filter: FilterMode::Nearest,
+            min_filter: FilterMode::Nearest,
+            mipmap_filter: FilterMode::Nearest,
+            compare: None,
+            ..Default::default()
+        });
+
+        let jfa_init_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("outline_jfa_init_bind_group_layout"),
+                entries: &[
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Texture {
+                            sample_type: TextureSampleType::Float { filterable: false },
+                            view_dimension: TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
+                        count: None,
+                    },
+                ],
+            });
+        let jfa_init_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("outline_jfa_init_bind_group"),
+            layout: &jfa_init_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&mask_output.default_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&sampler),
+                },
+            ],
         });
 
         let jfa_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -219,17 +275,6 @@ impl FromWorld for OutlineResources {
             tex_desc("outline_jfa_secondary_output", size, JFA_TEXTURE_FORMAT);
         let jfa_secondary_output = textures.get(&device, jfa_secondary_output_desc);
 
-        let sampler = device.create_sampler(&SamplerDescriptor {
-            label: Some("outline_jfa_sampler"),
-            address_mode_u: AddressMode::ClampToEdge,
-            address_mode_v: AddressMode::ClampToEdge,
-            address_mode_w: AddressMode::ClampToEdge,
-            mag_filter: FilterMode::Nearest,
-            min_filter: FilterMode::Nearest,
-            mipmap_filter: FilterMode::Nearest,
-            compare: None,
-            ..Default::default()
-        });
         let jfa_primary_bind_group = create_jfa_bind_group(
             &device,
             &jfa_bind_group_layout,
@@ -309,10 +354,13 @@ impl FromWorld for OutlineResources {
         );
 
         OutlineResources {
-            stencil_output,
+            mask_multisample,
+            mask_output,
             dimensions_bind_group_layout,
             dimensions_buffer,
             dimensions_bind_group,
+            jfa_init_bind_group_layout,
+            jfa_init_bind_group,
             jfa_bind_group_layout,
             sampler,
             jfa_distance_buffer,
@@ -350,12 +398,35 @@ pub fn recreate_outline_resources(
         outline.dimensions_buffer.write_buffer(&device, &queue);
     }
 
-    let stencil_desc = tex_desc(
-        "outline_stencil_output",
-        size,
-        TextureFormat::Depth24PlusStencil8,
-    );
-    outline.stencil_output = textures.get(&device, stencil_desc);
+    let old_mask = outline.mask_multisample.texture.id();
+    let mask_output_desc = tex_desc("outline_mask_output", size, TextureFormat::R8Unorm);
+    let mask_multisample_desc = TextureDescriptor {
+        label: Some("outline_mask_multisample"),
+        sample_count: 4,
+        ..mask_output_desc.clone()
+    };
+
+    // Recreate mask output targets.
+    outline.mask_output = textures.get(&device, mask_output_desc);
+    outline.mask_multisample = textures.get(&device, mask_multisample_desc);
+
+    if outline.mask_output.texture.id() != old_mask {
+        // Recreate JFA init pass bind group
+        outline.jfa_init_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("outline_jfa_init_bind_group"),
+            layout: &outline.jfa_init_bind_group_layout,
+            entries: &[
+                BindGroupEntry {
+                    binding: 0,
+                    resource: BindingResource::TextureView(&outline.mask_output.default_view),
+                },
+                BindGroupEntry {
+                    binding: 1,
+                    resource: BindingResource::Sampler(&outline.sampler),
+                },
+            ],
+        });
+    }
 
     *outline.outline_params_buffer.get_mut() =
         outline::OutlineParams::new(Color::hex("b4a2c8").unwrap(), size.width, size.height, 32.0);

@@ -30,14 +30,14 @@ use bevy::{
 };
 use jfa::JfaNode;
 use jfa_init::JfaInitNode;
+use mask::{MeshMaskNode, MeshMaskPipeline};
 use outline::OutlineNode;
-use stencil::{MeshStencilNode, MeshStencilPipeline};
 
 mod jfa;
 mod jfa_init;
+mod mask;
 mod outline;
 mod resources;
-mod stencil;
 
 pub const JFA_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rg16Snorm;
 const FULLSCREEN_PRIMITIVE_STATE: PrimitiveState = PrimitiveState {
@@ -53,7 +53,7 @@ const FULLSCREEN_PRIMITIVE_STATE: PrimitiveState = PrimitiveState {
 #[derive(Default)]
 pub struct OutlinePlugin;
 
-pub const STENCIL_SHADER_HANDLE: HandleUntyped =
+pub const MASK_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 10400755559809425757);
 pub const JFA_INIT_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11038189062916158841);
@@ -74,7 +74,7 @@ pub mod outline_graph {
     }
 
     pub mod node {
-        pub const STENCIL_PASS: &'static str = "stencil_pass";
+        pub const MASK_PASS: &'static str = "mask_pass";
         pub const JFA_INIT_PASS: &'static str = "jfa_init_pass";
         pub const JFA_PASS: &'static str = "jfa_pass";
         pub const OUTLINE_PASS: &'static str = "outline_pass";
@@ -84,8 +84,8 @@ pub mod outline_graph {
 impl Plugin for OutlinePlugin {
     fn build(&self, app: &mut App) {
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
-        let mask_shader = Shader::from_wgsl(include_str!("shaders/stencil.wgsl"));
-        shaders.set_untracked(STENCIL_SHADER_HANDLE, mask_shader);
+        let mask_shader = Shader::from_wgsl(include_str!("shaders/mask.wgsl"));
+        shaders.set_untracked(MASK_SHADER_HANDLE, mask_shader);
         let jfa_init_shader = Shader::from_wgsl(include_str!("shaders/jfa_init.wgsl"));
         shaders.set_untracked(JFA_INIT_SHADER_HANDLE, jfa_init_shader);
         let jfa_shader = Shader::from_wgsl(include_str!("shaders/jfa.wgsl"));
@@ -105,22 +105,22 @@ impl Plugin for OutlinePlugin {
         };
 
         render_app
-            .init_resource::<DrawFunctions<MeshStencil>>()
-            .add_render_command::<MeshStencil, SetItemPipeline>()
-            .add_render_command::<MeshStencil, DrawMeshStencil>()
+            .init_resource::<DrawFunctions<MeshMask>>()
+            .add_render_command::<MeshMask, SetItemPipeline>()
+            .add_render_command::<MeshMask, DrawMeshMask>()
             .init_resource::<resources::OutlineResources>()
-            .init_resource::<stencil::MeshStencilPipeline>()
-            .init_resource::<SpecializedMeshPipelines<stencil::MeshStencilPipeline>>()
+            .init_resource::<mask::MeshMaskPipeline>()
+            .init_resource::<SpecializedMeshPipelines<mask::MeshMaskPipeline>>()
             .init_resource::<jfa_init::JfaInitPipeline>()
             .init_resource::<jfa::JfaPipeline>()
             .init_resource::<outline::OutlinePipeline>()
             .init_resource::<SpecializedRenderPipelines<outline::OutlinePipeline>>()
             .add_system_to_stage(RenderStage::Extract, extract_outlines)
-            .add_system_to_stage(RenderStage::Extract, extract_stencil_camera_phase)
+            .add_system_to_stage(RenderStage::Extract, extract_mask_camera_phase)
             .add_system_to_stage(RenderStage::Prepare, resources::recreate_outline_resources)
-            .add_system_to_stage(RenderStage::Queue, queue_mesh_stencils);
+            .add_system_to_stage(RenderStage::Queue, queue_mesh_masks);
 
-        let stencil_node = MeshStencilNode::new(&mut render_app.world);
+        let mask_node = MeshMaskNode::new(&mut render_app.world);
         // TODO: BevyDefault for surface texture format is an anti-pattern;
         // the target texture format should be queried from the window when
         // Bevy exposes that functionality.
@@ -132,22 +132,22 @@ impl Plugin for OutlinePlugin {
             .unwrap();
 
         let input_node_id = draw_3d_graph.input_node().unwrap().id;
-        draw_3d_graph.add_node(outline_graph::node::STENCIL_PASS, stencil_node);
+        draw_3d_graph.add_node(outline_graph::node::MASK_PASS, mask_node);
         draw_3d_graph
             .add_slot_edge(
                 input_node_id,
                 outline_graph::input::VIEW_ENTITY,
-                outline_graph::node::STENCIL_PASS,
-                MeshStencilNode::IN_VIEW,
+                outline_graph::node::MASK_PASS,
+                MeshMaskNode::IN_VIEW,
             )
             .unwrap();
         draw_3d_graph.add_node(outline_graph::node::JFA_INIT_PASS, JfaInitNode);
         draw_3d_graph
             .add_slot_edge(
-                outline_graph::node::STENCIL_PASS,
-                MeshStencilNode::OUT_STENCIL,
+                outline_graph::node::MASK_PASS,
+                MeshMaskNode::OUT_MASK,
                 outline_graph::node::JFA_INIT_PASS,
-                JfaInitNode::IN_STENCIL,
+                JfaInitNode::IN_MASK,
             )
             .unwrap();
         draw_3d_graph.add_node(outline_graph::node::JFA_PASS, JfaNode);
@@ -179,14 +179,14 @@ impl Plugin for OutlinePlugin {
     }
 }
 
-pub struct MeshStencil {
+pub struct MeshMask {
     distance: f32,
     pipeline: CachedRenderPipelineId,
     entity: Entity,
     draw_function: DrawFunctionId,
 }
 
-impl PhaseItem for MeshStencil {
+impl PhaseItem for MeshMask {
     type SortKey = FloatOrd;
 
     fn sort_key(&self) -> Self::SortKey {
@@ -198,19 +198,19 @@ impl PhaseItem for MeshStencil {
     }
 }
 
-impl EntityPhaseItem for MeshStencil {
+impl EntityPhaseItem for MeshMask {
     fn entity(&self) -> Entity {
         self.entity
     }
 }
 
-impl CachedRenderPipelinePhaseItem for MeshStencil {
+impl CachedRenderPipelinePhaseItem for MeshMask {
     fn cached_pipeline(&self) -> CachedRenderPipelineId {
         self.pipeline
     }
 }
 
-type DrawMeshStencil = (
+type DrawMeshMask = (
     SetItemPipeline,
     SetMeshViewBindGroup<0>,
     SetMeshBindGroup<1>,
@@ -258,36 +258,36 @@ pub fn extract_outlines(
     commands.insert_or_spawn_batch(batches);
 }
 
-pub fn extract_stencil_camera_phase(
+pub fn extract_mask_camera_phase(
     mut commands: Commands,
     cameras: Query<Entity, (With<Camera3d>, With<CameraOutline>)>,
 ) {
     for entity in cameras.iter() {
         commands
             .get_or_spawn(entity)
-            .insert(RenderPhase::<MeshStencil>::default());
+            .insert(RenderPhase::<MeshMask>::default());
     }
 }
 
-pub fn queue_mesh_stencils(
-    mesh_stencil_draw_functions: Res<DrawFunctions<MeshStencil>>,
-    mesh_stencil_pipeline: Res<MeshStencilPipeline>,
-    mut pipelines: ResMut<SpecializedMeshPipelines<MeshStencilPipeline>>,
+pub fn queue_mesh_masks(
+    mesh_mask_draw_functions: Res<DrawFunctions<MeshMask>>,
+    mesh_mask_pipeline: Res<MeshMaskPipeline>,
+    mut pipelines: ResMut<SpecializedMeshPipelines<MeshMaskPipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
     render_meshes: Res<RenderAssets<Mesh>>,
     outline_meshes: Query<(Entity, &Handle<Mesh>, &MeshUniform)>,
     mut views: Query<(
         &ExtractedView,
         &mut VisibleEntities,
-        &mut RenderPhase<MeshStencil>,
+        &mut RenderPhase<MeshMask>,
     )>,
 ) {
-    let draw_outline = mesh_stencil_draw_functions
+    let draw_outline = mesh_mask_draw_functions
         .read()
-        .get_id::<DrawMeshStencil>()
+        .get_id::<DrawMeshMask>()
         .unwrap();
 
-    for (view, visible_entities, mut mesh_stencil_phase) in views.iter_mut() {
+    for (view, visible_entities, mut mesh_mask_phase) in views.iter_mut() {
         let view_matrix = view.transform.compute_matrix();
         let inv_view_row_2 = view_matrix.inverse().row(2);
 
@@ -305,15 +305,10 @@ pub fn queue_mesh_stencils(
             let key = MeshPipelineKey::from_primitive_topology(mesh.primitive_topology);
 
             let pipeline = pipelines
-                .specialize(
-                    &mut pipeline_cache,
-                    &mesh_stencil_pipeline,
-                    key,
-                    &mesh.layout,
-                )
+                .specialize(&mut pipeline_cache, &mesh_mask_pipeline, key, &mesh.layout)
                 .unwrap();
 
-            mesh_stencil_phase.add(MeshStencil {
+            mesh_mask_phase.add(MeshMask {
                 entity,
                 pipeline,
                 draw_function: draw_outline,

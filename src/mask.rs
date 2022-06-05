@@ -6,31 +6,30 @@ use bevy::{
         render_graph::{Node, RenderGraphContext, SlotInfo, SlotType},
         render_phase::{DrawFunctions, PhaseItem, RenderPhase, TrackedRenderPass},
         render_resource::{
-            CompareFunction, DepthStencilState, LoadOp, MultisampleState, Operations,
-            RenderPassDepthStencilAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
-            SpecializedMeshPipeline, SpecializedMeshPipelineError, StencilFaceState,
-            StencilOperation, StencilState, TextureFormat,
+            ColorTargetState, ColorWrites, FragmentState, LoadOp, MultisampleState, Operations,
+            RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
+            SpecializedMeshPipeline, SpecializedMeshPipelineError, TextureFormat,
         },
         renderer::RenderContext,
     },
     utils::{FixedState, Hashed},
 };
 
-use crate::{resources::OutlineResources, MeshStencil, STENCIL_SHADER_HANDLE};
+use crate::{resources::OutlineResources, MeshMask, MASK_SHADER_HANDLE};
 
-pub struct MeshStencilPipeline {
+pub struct MeshMaskPipeline {
     mesh_pipeline: MeshPipeline,
 }
 
-impl FromWorld for MeshStencilPipeline {
+impl FromWorld for MeshMaskPipeline {
     fn from_world(world: &mut World) -> Self {
         let mesh_pipeline = world.get_resource::<MeshPipeline>().unwrap().clone();
 
-        MeshStencilPipeline { mesh_pipeline }
+        MeshMaskPipeline { mesh_pipeline }
     }
 }
 
-impl SpecializedMeshPipeline for MeshStencilPipeline {
+impl SpecializedMeshPipeline for MeshMaskPipeline {
     type Key = MeshPipelineKey;
 
     fn specialize(
@@ -45,29 +44,22 @@ impl SpecializedMeshPipeline for MeshStencilPipeline {
             self.mesh_pipeline.mesh_layout.clone(),
         ]);
 
-        desc.vertex.shader = STENCIL_SHADER_HANDLE.typed::<Shader>();
+        desc.vertex.shader = MASK_SHADER_HANDLE.typed::<Shader>();
 
-        // We only care about the stencil buffer output, so no fragment stage is necessary.
-        desc.fragment = None;
-
-        desc.depth_stencil = desc.depth_stencil.map(|ds| DepthStencilState {
-            format: TextureFormat::Depth24PlusStencil8,
-            stencil: StencilState {
-                front: StencilFaceState {
-                    compare: CompareFunction::Always,
-                    fail_op: StencilOperation::Replace,
-                    depth_fail_op: StencilOperation::Replace,
-                    pass_op: StencilOperation::Replace,
-                },
-                back: StencilFaceState::IGNORE,
-                read_mask: 0,
-                write_mask: !0,
-            },
-            ..ds
+        desc.fragment = Some(FragmentState {
+            shader: MASK_SHADER_HANDLE.typed::<Shader>(),
+            shader_defs: vec![],
+            entry_point: "fragment".into(),
+            targets: vec![ColorTargetState {
+                format: TextureFormat::R8Unorm,
+                blend: None,
+                write_mask: ColorWrites::ALL,
+            }],
         });
+        desc.depth_stencil = None;
 
         desc.multisample = MultisampleState {
-            count: 1,
+            count: 4,
             mask: !0,
             alpha_to_coverage_enabled: false,
         };
@@ -78,11 +70,11 @@ impl SpecializedMeshPipeline for MeshStencilPipeline {
 }
 
 /// Render graph node for producing stencils from meshes.
-pub struct MeshStencilNode {
-    query: QueryState<&'static RenderPhase<MeshStencil>>,
+pub struct MeshMaskNode {
+    query: QueryState<&'static RenderPhase<MeshMask>>,
 }
 
-impl MeshStencilNode {
+impl MeshMaskNode {
     pub const IN_VIEW: &'static str = "view";
 
     /// The produced stencil buffer.
@@ -90,22 +82,22 @@ impl MeshStencilNode {
     /// This has format `TextureFormat::Depth24PlusStencil8`. Fragments covered
     /// by a mesh are assigned a value of 255. All other fragments are assigned
     /// a value of 0. The depth aspect is unused.
-    pub const OUT_STENCIL: &'static str = "stencil";
+    pub const OUT_MASK: &'static str = "stencil";
 
-    pub fn new(world: &mut World) -> MeshStencilNode {
-        MeshStencilNode {
+    pub fn new(world: &mut World) -> MeshMaskNode {
+        MeshMaskNode {
             query: QueryState::new(world),
         }
     }
 }
 
-impl Node for MeshStencilNode {
+impl Node for MeshMaskNode {
     fn input(&self) -> Vec<SlotInfo> {
         vec![SlotInfo::new(Self::IN_VIEW, SlotType::Entity)]
     }
 
     fn output(&self) -> Vec<SlotInfo> {
-        vec![SlotInfo::new(Self::OUT_STENCIL, SlotType::TextureView)]
+        vec![SlotInfo::new(Self::OUT_MASK, SlotType::TextureView)]
     }
 
     fn update(&mut self, world: &mut World) {
@@ -121,7 +113,7 @@ impl Node for MeshStencilNode {
         let res = world.get_resource::<OutlineResources>().unwrap();
 
         graph
-            .set_output(Self::OUT_STENCIL, res.stencil_output.default_view.clone())
+            .set_output(Self::OUT_MASK, res.mask_multisample.default_view.clone())
             .unwrap();
 
         let view_entity = graph.get_input_entity(Self::IN_VIEW).unwrap();
@@ -134,20 +126,19 @@ impl Node for MeshStencilNode {
             .command_encoder
             .begin_render_pass(&RenderPassDescriptor {
                 label: Some("outline_stencil_render_pass"),
-                color_attachments: &[],
-                depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
-                    view: &res.stencil_output.default_view,
-                    depth_ops: None,
-                    stencil_ops: Some(Operations {
-                        load: LoadOp::Clear(0),
+                color_attachments: &[RenderPassColorAttachment {
+                    view: &res.mask_multisample.default_view,
+                    resolve_target: Some(&res.mask_output.default_view),
+                    ops: Operations {
+                        load: LoadOp::Clear(Color::BLACK.into()),
                         store: true,
-                    }),
-                }),
+                    },
+                }],
+                depth_stencil_attachment: None,
             });
         let mut pass = TrackedRenderPass::new(pass_raw);
 
-        pass.set_stencil_reference(!0);
-        let draw_functions = world.get_resource::<DrawFunctions<MeshStencil>>().unwrap();
+        let draw_functions = world.get_resource::<DrawFunctions<MeshMask>>().unwrap();
         let mut draw_functions = draw_functions.write();
         for item in stencil_phase.items.iter() {
             let draw_function = draw_functions.get_mut(item.draw_function()).unwrap();

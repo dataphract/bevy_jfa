@@ -20,3 +20,8 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     out.clip_position = view.view_proj * mesh.model * vec4<f32>(vertex.position, 1.0);
     return out;
 }
+
+[[stage(fragment)]]
+fn fragment() -> [[location(0)]] vec4<f32> {
+    return vec4<f32>(1.0, 1.0, 1.0, 1.0);
+}
