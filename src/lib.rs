@@ -8,7 +8,6 @@ use bevy::{
     app::prelude::*,
     asset::{Assets, Handle, HandleUntyped},
     ecs::{prelude::*, system::SystemParamItem},
-    math::prelude::*,
     pbr::{DrawMesh, MeshPipelineKey, MeshUniform, SetMeshBindGroup, SetMeshViewBindGroup},
     prelude::{AddAsset, Camera3d},
     reflect::TypeUuid,
@@ -20,7 +19,7 @@ use bevy::{
             AddRenderCommand, CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions,
             EntityPhaseItem, PhaseItem, RenderPhase, SetItemPipeline,
         },
-        render_resource::{ShaderType, *},
+        render_resource::*,
         renderer::{RenderDevice, RenderQueue},
         texture::BevyDefault,
         view::{ExtractedView, VisibleEntities},
@@ -40,7 +39,7 @@ mod mask;
 mod outline;
 mod resources;
 
-pub const JFA_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rg16Snorm;
+const JFA_TEXTURE_FORMAT: TextureFormat = TextureFormat::Rg16Snorm;
 const FULLSCREEN_PRIMITIVE_STATE: PrimitiveState = PrimitiveState {
     topology: PrimitiveTopology::TriangleList,
     strip_index_format: None,
@@ -54,22 +53,20 @@ const FULLSCREEN_PRIMITIVE_STATE: PrimitiveState = PrimitiveState {
 #[derive(Default)]
 pub struct OutlinePlugin;
 
-pub const MASK_SHADER_HANDLE: HandleUntyped =
+const MASK_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 10400755559809425757);
-pub const JFA_INIT_SHADER_HANDLE: HandleUntyped =
+const JFA_INIT_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11038189062916158841);
-pub const JFA_SHADER_HANDLE: HandleUntyped =
+const JFA_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 5227804998548228051);
-pub const FULLSCREEN_SHADER_HANDLE: HandleUntyped =
+const FULLSCREEN_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 12099561278220359682);
-pub const OUTLINE_SHADER_HANDLE: HandleUntyped =
+const OUTLINE_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11094028876979933159);
-pub const DIMENSIONS_SHADER_HANDLE: HandleUntyped =
+const DIMENSIONS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11721531257850828867);
 
-pub mod outline_graph {
-    pub const NAME: &str = "outline_graph";
-
+mod outline_graph {
     pub mod input {
         pub const VIEW_ENTITY: &str = "view_entity";
     }
@@ -275,12 +272,6 @@ pub struct CameraOutline {
 #[derive(Clone, Debug, PartialEq, Component)]
 pub struct Outline {
     pub enabled: bool,
-}
-
-#[derive(ShaderType, Clone, Component)]
-pub struct OutlineUniform {
-    pub color: Vec4,
-    pub width: u32,
 }
 
 fn extract_camera_outlines(

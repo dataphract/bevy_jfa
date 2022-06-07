@@ -118,7 +118,14 @@ impl Node for JfaNode {
             }
         };
 
-        let max_exp = 6;
+        // The half-width of the JFA region is 2^(max_exp + 1) - 1.
+        //
+        // weight < 2^(max_exp + 1) - 1
+        // weight + 1 < 2^(max_exp + 1)
+        // log2(weight + 1) < max_exp + 1
+        // max_exp > log2(weight + 1) - 1
+
+        let max_exp = 8;
         for it in 0..=max_exp {
             let exp = max_exp - it;
 
@@ -137,7 +144,15 @@ impl Node for JfaNode {
                 resolve_target: None,
                 ops: Operations {
                     // TODO: ideally, this would be the equivalent of DONT_CARE, but wgpu doesn't expose that.
-                    load: LoadOp::Load,
+                    load: LoadOp::Clear(
+                        Color::RgbaLinear {
+                            red: -1.0,
+                            green: -1.0,
+                            blue: 0.0,
+                            alpha: 0.0,
+                        }
+                        .into(),
+                    ),
                     store: true,
                 },
             };
