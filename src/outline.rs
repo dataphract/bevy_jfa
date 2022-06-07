@@ -6,12 +6,12 @@ use bevy::{
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_phase::TrackedRenderPass,
         render_resource::{
-            BindGroupLayout, BlendComponent, BlendFactor, BlendOperation, BlendState,
+            BindGroup, BindGroupLayout, BlendComponent, BlendFactor, BlendOperation, BlendState,
             CachedRenderPipelineId, ColorTargetState, ColorWrites, FragmentState, LoadOp,
             MultisampleState, Operations, PipelineCache, RenderPassColorAttachment,
             RenderPassDescriptor, RenderPipelineDescriptor, ShaderType, SpecializedRenderPipeline,
             SpecializedRenderPipelines, TextureFormat, TextureSampleType, TextureUsages,
-            VertexState,
+            UniformBuffer, VertexState,
         },
         renderer::RenderContext,
         view::ExtractedWindows,
@@ -20,50 +20,48 @@ use bevy::{
 
 use crate::{
     resources::{self, OutlineResources},
-    FULLSCREEN_PRIMITIVE_STATE, OUTLINE_SHADER_HANDLE,
+    CameraOutline, OutlineStyle, FULLSCREEN_PRIMITIVE_STATE, OUTLINE_SHADER_HANDLE,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, ShaderType)]
 pub struct OutlineParams {
     // Outline color.
     color: Vec4,
-    // Inverse aspect ratio (height / width).
-    inv_aspect: f32,
     // Outline weight in pixels.
     weight: f32,
 }
 
 impl OutlineParams {
-    pub fn new(color: Color, width: u32, height: u32, weight: f32) -> OutlineParams {
+    pub fn new(color: Color, weight: f32) -> OutlineParams {
         let color: Vec4 = color.as_rgba_f32().into();
 
-        let w = width as f32;
-        let h = height as f32;
-        let inv_aspect = h / w;
-
-        OutlineParams {
-            color,
-            inv_aspect,
-            weight,
-        }
+        OutlineParams { color, weight }
     }
+}
+
+pub struct GpuOutlineParams {
+    pub(crate) _buffer: UniformBuffer<OutlineParams>,
+    pub(crate) bind_group: BindGroup,
 }
 
 #[derive(Clone, Debug)]
 pub struct OutlinePipeline {
     dimensions_layout: BindGroupLayout,
     input_layout: BindGroupLayout,
+    params_layout: BindGroupLayout,
 }
 
 impl FromWorld for OutlinePipeline {
     fn from_world(world: &mut World) -> Self {
         let res = world.get_resource::<resources::OutlineResources>().unwrap();
         let dimensions_layout = res.dimensions_bind_group_layout.clone();
-        let input_layout = res.outline_bind_group_layout.clone();
+        let input_layout = res.outline_src_bind_group_layout.clone();
+        let params_layout = res.outline_params_bind_group_layout.clone();
 
         OutlinePipeline {
             dimensions_layout,
             input_layout,
+            params_layout,
         }
     }
 }
@@ -116,6 +114,7 @@ impl SpecializedRenderPipeline for OutlinePipeline {
             layout: Some(vec![
                 self.dimensions_layout.clone(),
                 self.input_layout.clone(),
+                self.params_layout.clone(),
             ]),
             vertex: VertexState {
                 shader: OUTLINE_SHADER_HANDLE.typed::<Shader>(),
@@ -146,7 +145,7 @@ impl SpecializedRenderPipeline for OutlinePipeline {
 
 pub struct OutlineNode {
     pipeline_id: CachedRenderPipelineId,
-    query: QueryState<&'static ExtractedCamera>,
+    query: QueryState<(&'static ExtractedCamera, &'static CameraOutline)>,
 }
 
 impl OutlineNode {
@@ -202,14 +201,20 @@ impl Node for OutlineNode {
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), NodeRunError> {
-        let camera = graph.get_input_entity(Self::IN_VIEW)?.clone();
-        let target = &self.query.get_manual(world, camera).unwrap().target;
+        let view_ent = graph.get_input_entity(Self::IN_VIEW)?;
+        graph.set_output(Self::OUT_VIEW, view_ent)?;
+
+        let (camera, outline) = &self.query.get_manual(world, view_ent).unwrap();
 
         let windows = world.resource::<ExtractedWindows>();
         let images = world.resource::<RenderAssets<Image>>();
-        let target_view = target.get_texture_view(windows, images).unwrap();
+        let target_view = match camera.target.get_texture_view(windows, images) {
+            Some(v) => v,
+            None => return Ok(()),
+        };
 
-        graph.set_output(Self::OUT_VIEW, camera)?;
+        let styles = world.resource::<RenderAssets<OutlineStyle>>();
+        let style = styles.get(&outline.style).unwrap();
 
         let res = world.get_resource::<OutlineResources>().unwrap();
 
@@ -236,9 +241,10 @@ impl Node for OutlineNode {
             });
 
         let mut tracked_pass = TrackedRenderPass::new(render_pass);
-        tracked_pass.set_render_pipeline(&pipeline);
+        tracked_pass.set_render_pipeline(pipeline);
         tracked_pass.set_bind_group(0, &res.dimensions_bind_group, &[]);
         tracked_pass.set_bind_group(1, &res.primary_outline_bind_group, &[]);
+        tracked_pass.set_bind_group(2, &style.bind_group, &[]);
         tracked_pass.draw(0..3, 0..1);
 
         Ok(())

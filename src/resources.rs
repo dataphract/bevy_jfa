@@ -19,19 +19,23 @@ use bevy::{
 use crate::{jfa, outline, JFA_TEXTURE_FORMAT};
 
 pub struct OutlineResources {
-    // Target for initial mask pass.
+    // Multisample target for initial mask pass.
     pub mask_multisample: CachedTexture,
+    // Resolve target for the above.
     pub mask_output: CachedTexture,
 
     pub dimensions_bind_group_layout: BindGroupLayout,
     pub dimensions_buffer: UniformBuffer<jfa::Dimensions>,
     pub dimensions_bind_group: BindGroup,
 
+    // Non-filtering sampler for all sampling operations.
     pub sampler: Sampler,
 
+    // Bind group and layout for JFA init pass.
     pub jfa_init_bind_group_layout: BindGroupLayout,
     pub jfa_init_bind_group: BindGroup,
 
+    // Bind group layout for JFA iteration passes.
     pub jfa_bind_group_layout: BindGroupLayout,
     // Dynamic uniform buffer containing power-of-two JFA distances from 1 to 32768.
     // TODO: use instance ID instead?
@@ -48,8 +52,10 @@ pub struct OutlineResources {
     // Secondary jump flood output.
     pub jfa_secondary_output: CachedTexture,
 
-    pub outline_params_buffer: UniformBuffer<outline::OutlineParams>,
-    pub outline_bind_group_layout: BindGroupLayout,
+    // Bind group layout for sampling JFA results in the outline shader.
+    pub outline_src_bind_group_layout: BindGroupLayout,
+    // Bind group layout for outline style parameters.
+    pub outline_params_bind_group_layout: BindGroupLayout,
     pub primary_outline_bind_group: BindGroup,
     pub secondary_outline_bind_group: BindGroup,
 }
@@ -100,28 +106,23 @@ fn create_jfa_bind_group(
     })
 }
 
-fn create_outline_bind_group(
+fn create_outline_src_bind_group(
     device: &RenderDevice,
     layout: &BindGroupLayout,
     label: &str,
-    buffer: BindingResource,
     target: &TextureView,
     sampler: &Sampler,
 ) -> BindGroup {
     device.create_bind_group(&BindGroupDescriptor {
         label: Some(label),
-        layout: &layout,
+        layout,
         entries: &[
             BindGroupEntry {
                 binding: 0,
-                resource: buffer,
-            },
-            BindGroupEntry {
-                binding: 1,
                 resource: BindingResource::TextureView(target),
             },
             BindGroupEntry {
-                binding: 2,
+                binding: 1,
                 resource: BindingResource::Sampler(sampler),
             },
         ],
@@ -294,15 +295,38 @@ impl FromWorld for OutlineResources {
 
         let mut outline_params_buffer = UniformBuffer::from(outline::OutlineParams::new(
             Color::hex("b4a2c8").unwrap(),
-            size.width,
-            size.height,
             32.0,
         ));
         outline_params_buffer.write_buffer(&device, &queue);
 
-        let outline_bind_group_layout =
+        let outline_src_bind_group_layout =
             device.create_bind_group_layout(&BindGroupLayoutDescriptor {
                 label: Some("jfa_outline_bind_group_layout"),
+                entries: &[
+                    // JFA texture
+                    BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Texture {
+                            sample_type: TextureSampleType::Float { filterable: false },
+                            view_dimension: TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    // Sampler
+                    BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: ShaderStages::FRAGMENT,
+                        ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
+                        count: None,
+                    },
+                ],
+            });
+
+        let outline_params_bind_group_layout =
+            device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+                label: Some("jfa_outline_params_bind_group_layout"),
                 entries: &[
                     // OutlineParams
                     BindGroupLayoutEntry {
@@ -315,40 +339,20 @@ impl FromWorld for OutlineResources {
                         },
                         count: None,
                     },
-                    // JFA texture
-                    BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: ShaderStages::FRAGMENT,
-                        ty: BindingType::Texture {
-                            sample_type: TextureSampleType::Float { filterable: false },
-                            view_dimension: TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    // Sampler
-                    BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: ShaderStages::FRAGMENT,
-                        ty: BindingType::Sampler(SamplerBindingType::NonFiltering),
-                        count: None,
-                    },
                 ],
             });
 
-        let primary_outline_bind_group = create_outline_bind_group(
+        let primary_outline_bind_group = create_outline_src_bind_group(
             &device,
-            &outline_bind_group_layout,
-            "jfa_primary_outline_bind_group",
-            outline_params_buffer.binding().unwrap(),
+            &outline_src_bind_group_layout,
+            "jfa_primary_outline_src_bind_group",
             &jfa_primary_output.default_view,
             &sampler,
         );
-        let secondary_outline_bind_group = create_outline_bind_group(
+        let secondary_outline_bind_group = create_outline_src_bind_group(
             &device,
-            &outline_bind_group_layout,
-            "jfa_secondary_outline_bind_group",
-            outline_params_buffer.binding().unwrap(),
+            &outline_src_bind_group_layout,
+            "jfa_secondary_outline_src_bind_group",
             &jfa_secondary_output.default_view,
             &sampler,
         );
@@ -369,8 +373,8 @@ impl FromWorld for OutlineResources {
             jfa_primary_output,
             jfa_secondary_bind_group,
             jfa_secondary_output,
-            outline_params_buffer,
-            outline_bind_group_layout,
+            outline_src_bind_group_layout,
+            outline_params_bind_group_layout,
             primary_outline_bind_group,
             secondary_outline_bind_group,
         }
@@ -384,7 +388,11 @@ pub fn recreate_outline_resources(
     mut textures: ResMut<TextureCache>,
     windows: Res<ExtractedWindows>,
 ) {
-    let primary = windows.get(&WindowId::primary()).unwrap();
+    let primary = match windows.get(&WindowId::primary()) {
+        Some(w) => w,
+        None => return,
+    };
+
     let size = Extent3d {
         width: primary.physical_width,
         height: primary.physical_height,
@@ -428,10 +436,6 @@ pub fn recreate_outline_resources(
         });
     }
 
-    *outline.outline_params_buffer.get_mut() =
-        outline::OutlineParams::new(Color::hex("b4a2c8").unwrap(), size.width, size.height, 32.0);
-    outline.outline_params_buffer.write_buffer(&device, &queue);
-
     // The JFA passes ping-pong between the primary and secondary outputs, so
     // when the primary target is recreated, the secondary bind group is
     // recreated, and vice-versa.
@@ -446,11 +450,10 @@ pub fn recreate_outline_resources(
             "outline_jfa_secondary_bind_group",
             &outline.jfa_primary_output.default_view,
         );
-        outline.primary_outline_bind_group = create_outline_bind_group(
+        outline.primary_outline_bind_group = create_outline_src_bind_group(
             &device,
-            &outline.outline_bind_group_layout,
+            &outline.outline_src_bind_group_layout,
             "jfa_primary_outline_bind_group",
-            outline.outline_params_buffer.binding().unwrap(),
             &outline.jfa_primary_output.default_view,
             &outline.sampler,
         );
@@ -466,11 +469,10 @@ pub fn recreate_outline_resources(
             "outline_jfa_primary_bind_group",
             &outline.jfa_secondary_output.default_view,
         );
-        outline.secondary_outline_bind_group = create_outline_bind_group(
+        outline.secondary_outline_bind_group = create_outline_src_bind_group(
             &device,
-            &outline.outline_bind_group_layout,
+            &outline.outline_src_bind_group_layout,
             "jfa_secondary_outline_bind_group",
-            outline.outline_params_buffer.binding().unwrap(),
             &outline.jfa_secondary_output.default_view,
             &outline.sampler,
         );

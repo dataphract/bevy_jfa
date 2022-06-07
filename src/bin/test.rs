@@ -1,9 +1,10 @@
 use bevy::prelude::*;
-use bevy_jfa::{CameraOutline, Outline, OutlinePlugin};
+use bevy_jfa::{CameraOutline, Outline, OutlinePlugin, OutlineStyle};
 
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
+    mut outline_styles: ResMut<Assets<OutlineStyle>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     commands
@@ -17,18 +18,20 @@ fn setup(
             }),
             ..Default::default()
         })
-        .insert(Outline {
-            enabled: true,
-            width: 16,
-            color: Color::AZURE,
-        });
+        .insert(Outline { enabled: true });
 
     commands
         .spawn_bundle(Camera3dBundle {
             transform: Transform::from_xyz(3.0, 2.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..Camera3dBundle::default()
         })
-        .insert(CameraOutline { enabled: true });
+        .insert(CameraOutline {
+            enabled: true,
+            style: outline_styles.add(OutlineStyle {
+                color: Color::hex("b4a2c8").unwrap(),
+                width: 16.0,
+            }),
+        });
 
     commands.spawn_bundle(PointLightBundle {
         point_light: PointLight {

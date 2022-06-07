@@ -138,7 +138,7 @@ impl Node for JfaInitNode {
                 depth_stencil_attachment: None,
             });
         let mut tracked_pass = TrackedRenderPass::new(render_pass);
-        tracked_pass.set_render_pipeline(&cached_pipeline);
+        tracked_pass.set_render_pipeline(cached_pipeline);
         tracked_pass.set_bind_group(0, &res.dimensions_bind_group, &[]);
         tracked_pass.set_bind_group(1, &res.jfa_init_bind_group, &[]);
         tracked_pass.draw(0..3, 0..1);

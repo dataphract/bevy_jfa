@@ -7,31 +7,32 @@
 use bevy::{
     app::prelude::*,
     asset::{Assets, Handle, HandleUntyped},
-    ecs::prelude::*,
+    ecs::{prelude::*, system::SystemParamItem},
     math::prelude::*,
     pbr::{DrawMesh, MeshPipelineKey, MeshUniform, SetMeshBindGroup, SetMeshViewBindGroup},
-    prelude::Camera3d,
+    prelude::{AddAsset, Camera3d},
     reflect::TypeUuid,
     render::{
         prelude::*,
-        render_asset::RenderAssets,
+        render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssets},
         render_graph::RenderGraph,
         render_phase::{
             AddRenderCommand, CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions,
             EntityPhaseItem, PhaseItem, RenderPhase, SetItemPipeline,
         },
         render_resource::{ShaderType, *},
+        renderer::{RenderDevice, RenderQueue},
         texture::BevyDefault,
         view::{ExtractedView, VisibleEntities},
         RenderApp, RenderStage,
     },
-    transform::components::GlobalTransform,
     utils::FloatOrd,
 };
 use jfa::JfaNode;
 use jfa_init::JfaInitNode;
 use mask::{MeshMaskNode, MeshMaskPipeline};
-use outline::OutlineNode;
+use outline::{GpuOutlineParams, OutlineNode, OutlineParams};
+use resources::OutlineResources;
 
 mod jfa;
 mod jfa_init;
@@ -67,22 +68,25 @@ pub const DIMENSIONS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11721531257850828867);
 
 pub mod outline_graph {
-    pub const NAME: &'static str = "outline_graph";
+    pub const NAME: &str = "outline_graph";
 
     pub mod input {
-        pub const VIEW_ENTITY: &'static str = "view_entity";
+        pub const VIEW_ENTITY: &str = "view_entity";
     }
 
     pub mod node {
-        pub const MASK_PASS: &'static str = "mask_pass";
-        pub const JFA_INIT_PASS: &'static str = "jfa_init_pass";
-        pub const JFA_PASS: &'static str = "jfa_pass";
-        pub const OUTLINE_PASS: &'static str = "outline_pass";
+        pub const MASK_PASS: &str = "mask_pass";
+        pub const JFA_INIT_PASS: &str = "jfa_init_pass";
+        pub const JFA_PASS: &str = "jfa_pass";
+        pub const OUTLINE_PASS: &str = "outline_pass";
     }
 }
 
 impl Plugin for OutlinePlugin {
     fn build(&self, app: &mut App) {
+        app.add_plugin(RenderAssetPlugin::<OutlineStyle>::default())
+            .add_asset::<OutlineStyle>();
+
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
         let mask_shader = Shader::from_wgsl(include_str!("shaders/mask.wgsl"));
         shaders.set_untracked(MASK_SHADER_HANDLE, mask_shader);
@@ -115,7 +119,7 @@ impl Plugin for OutlinePlugin {
             .init_resource::<jfa::JfaPipeline>()
             .init_resource::<outline::OutlinePipeline>()
             .init_resource::<SpecializedRenderPipelines<outline::OutlinePipeline>>()
-            .add_system_to_stage(RenderStage::Extract, extract_outlines)
+            .add_system_to_stage(RenderStage::Extract, extract_camera_outlines)
             .add_system_to_stage(RenderStage::Extract, extract_mask_camera_phase)
             .add_system_to_stage(RenderStage::Prepare, resources::recreate_outline_resources)
             .add_system_to_stage(RenderStage::Queue, queue_mesh_masks);
@@ -179,7 +183,7 @@ impl Plugin for OutlinePlugin {
     }
 }
 
-pub struct MeshMask {
+struct MeshMask {
     distance: f32,
     pipeline: CachedRenderPipelineId,
     entity: Entity,
@@ -217,18 +221,60 @@ type DrawMeshMask = (
     DrawMesh,
 );
 
+#[derive(Clone, Debug, PartialEq, TypeUuid)]
+#[uuid = "256fd556-e497-4df2-8d9c-9bdb1419ee90"]
+pub struct OutlineStyle {
+    pub color: Color,
+    pub width: f32,
+}
+
+impl RenderAsset for OutlineStyle {
+    type ExtractedAsset = OutlineParams;
+    type PreparedAsset = GpuOutlineParams;
+    type Param = (
+        Res<'static, RenderDevice>,
+        Res<'static, RenderQueue>,
+        Res<'static, OutlineResources>,
+    );
+
+    fn extract_asset(&self) -> Self::ExtractedAsset {
+        OutlineParams::new(self.color, self.width)
+    }
+
+    fn prepare_asset(
+        extracted_asset: Self::ExtractedAsset,
+        (device, queue, outline_res): &mut SystemParamItem<Self::Param>,
+    ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
+        let mut buffer = UniformBuffer::from(extracted_asset);
+        buffer.write_buffer(device, queue);
+
+        let bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: None,
+            layout: &outline_res.outline_params_bind_group_layout,
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: buffer.buffer().unwrap().as_entire_binding(),
+            }],
+        });
+
+        Ok(GpuOutlineParams {
+            _buffer: buffer,
+            bind_group,
+        })
+    }
+}
+
 /// Component for enabling outlines when rendering with a given camera.
 #[derive(Clone, Debug, PartialEq, Component)]
 pub struct CameraOutline {
     pub enabled: bool,
+    pub style: Handle<OutlineStyle>,
 }
 
 /// Component for entities that should be outlined.
 #[derive(Clone, Debug, PartialEq, Component)]
 pub struct Outline {
     pub enabled: bool,
-    pub width: u32,
-    pub color: Color,
 }
 
 #[derive(ShaderType, Clone, Component)]
@@ -237,28 +283,22 @@ pub struct OutlineUniform {
     pub width: u32,
 }
 
-pub fn extract_outlines(
+fn extract_camera_outlines(
     mut commands: Commands,
-    mut previous_outlined_len: Local<usize>,
-    outlined_query: Query<(Entity, &Outline), (With<GlobalTransform>, With<Handle<Mesh>>)>,
+    mut previous_outline_len: Local<usize>,
+    cam_outline_query: Query<(Entity, &CameraOutline), With<Camera>>,
 ) {
-    let mut batches = Vec::with_capacity(*previous_outlined_len);
-    batches.extend(outlined_query.iter().filter_map(|(entity, outline)| {
-        outline.enabled.then(|| {
-            (
-                entity,
-                (OutlineUniform {
-                    color: outline.color.as_linear_rgba_f32().into(),
-                    width: outline.width,
-                },),
-            )
-        })
-    }));
-    *previous_outlined_len = batches.len();
+    let mut batches = Vec::with_capacity(*previous_outline_len);
+    batches.extend(
+        cam_outline_query
+            .iter()
+            .filter_map(|(entity, outline)| outline.enabled.then(|| (entity, (outline.clone(),)))),
+    );
+    *previous_outline_len = batches.len();
     commands.insert_or_spawn_batch(batches);
 }
 
-pub fn extract_mask_camera_phase(
+fn extract_mask_camera_phase(
     mut commands: Commands,
     cameras: Query<Entity, (With<Camera3d>, With<CameraOutline>)>,
 ) {
@@ -269,7 +309,7 @@ pub fn extract_mask_camera_phase(
     }
 }
 
-pub fn queue_mesh_masks(
+fn queue_mesh_masks(
     mesh_mask_draw_functions: Res<DrawFunctions<MeshMask>>,
     mesh_mask_pipeline: Res<MeshMaskPipeline>,
     mut pipelines: ResMut<SpecializedMeshPipelines<MeshMaskPipeline>>,
