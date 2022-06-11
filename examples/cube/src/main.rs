@@ -1,28 +1,57 @@
 use bevy::prelude::*;
 use bevy_jfa::{CameraOutline, Outline, OutlinePlugin, OutlineStyle};
 
+#[derive(Clone, Debug, Component)]
+struct RotationAxis(Vec3);
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut outline_styles: ResMut<Assets<OutlineStyle>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let mesh = meshes.add(Mesh::from(shape::Cube { size: 1.0 }));
+    let material = materials.add(StandardMaterial {
+        base_color: Color::INDIGO,
+        perceptual_roughness: 0.25,
+        metallic: 0.5,
+        ..Default::default()
+    });
+
     commands
         .spawn_bundle(PbrBundle {
-            mesh: meshes.add(Mesh::from(shape::Cube { size: 1.0 })),
-            material: materials.add(StandardMaterial {
-                base_color: Color::INDIGO,
-                perceptual_roughness: 0.25,
-                metallic: 0.5,
-                ..Default::default()
-            }),
+            mesh: mesh.clone(),
+            material: material.clone(),
+            transform: Transform::from_xyz(0.0, 0.0, 0.0),
             ..Default::default()
         })
+        .insert(RotationAxis(Vec3::Y))
+        .insert(Outline { enabled: true });
+
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh: mesh.clone(),
+            material: material.clone(),
+            transform: Transform::from_xyz(-2.0, 0.0, 0.0),
+            ..Default::default()
+        })
+        .insert(RotationAxis(Vec3::X))
+        .insert(Outline { enabled: true });
+
+    commands
+        .spawn_bundle(PbrBundle {
+            mesh,
+            material,
+            transform: Transform::from_xyz(0.0, 0.0, -2.0),
+            ..Default::default()
+        })
+        .insert(RotationAxis(Vec3::Z))
         .insert(Outline { enabled: true });
 
     commands
         .spawn_bundle(Camera3dBundle {
-            transform: Transform::from_xyz(3.0, 2.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(3.0, 2.0, 3.0)
+                .looking_at([-1.0, -0.5, -1.0].into(), Vec3::Y),
             ..Camera3dBundle::default()
         })
         .insert(CameraOutline {
@@ -46,11 +75,11 @@ fn setup(
     });
 }
 
-fn rotate_cube(time: Res<Time>, mut query: Query<&mut Transform, With<Outline>>) {
+fn rotate_cube(time: Res<Time>, mut query: Query<(&mut Transform, &RotationAxis), With<Outline>>) {
     let delta = time.delta_seconds();
 
-    for mut xform in query.iter_mut() {
-        xform.rotate(Quat::from_rotation_y(delta));
+    for (mut xform, rot) in query.iter_mut() {
+        xform.rotate(Quat::from_axis_angle(rot.0, delta));
     }
 }
 
