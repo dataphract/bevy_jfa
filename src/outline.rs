@@ -243,7 +243,7 @@ impl Node for OutlineNode {
         let mut tracked_pass = TrackedRenderPass::new(render_pass);
         tracked_pass.set_render_pipeline(pipeline);
         tracked_pass.set_bind_group(0, &res.dimensions_bind_group, &[]);
-        tracked_pass.set_bind_group(1, &res.primary_outline_bind_group, &[]);
+        tracked_pass.set_bind_group(1, &res.outline_src_bind_group, &[]);
         tracked_pass.set_bind_group(2, &style.bind_group, &[]);
         tracked_pass.draw(0..3, 0..1);
 

@@ -131,12 +131,21 @@ impl Node for JfaNode {
 
             let target: &TextureView;
             let src: &BindGroup;
+
             if it % 2 == 1 {
-                target = &res.jfa_primary_output.default_view;
-                src = &res.jfa_primary_bind_group;
+                if it == max_exp {
+                    target = &res.jfa_final_output.default_view;
+                } else {
+                    target = &res.jfa_primary_output.default_view;
+                }
+                src = &res.jfa_from_secondary_bind_group;
             } else {
-                target = &res.jfa_secondary_output.default_view;
-                src = &res.jfa_secondary_bind_group;
+                if it == max_exp {
+                    target = &res.jfa_final_output.default_view;
+                } else {
+                    target = &res.jfa_secondary_output.default_view;
+                }
+                src = &res.jfa_from_primary_bind_group;
             }
 
             let attachment = RenderPassColorAttachment {

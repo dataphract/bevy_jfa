@@ -18,6 +18,10 @@ use bevy::{
 
 use crate::{jfa, outline, JFA_TEXTURE_FORMAT};
 
+const JFA_FROM_PRIMARY: &str = "jfa_from_primary_output_bind_group";
+const JFA_FROM_SECONDARY: &str = "jfa_from_secondary_output_bind_group";
+const JFA_OUTLINE_SRC: &str = "jfa_outline_src_bind_group";
+
 pub struct OutlineResources {
     // Multisample target for initial mask pass.
     pub mask_multisample: CachedTexture,
@@ -43,21 +47,23 @@ pub struct OutlineResources {
     pub jfa_distance_offsets: Vec<u32>,
 
     // Bind group for jump flood passes targeting the primary output.
-    pub jfa_primary_bind_group: BindGroup,
+    pub jfa_from_secondary_bind_group: BindGroup,
     // Primary jump flood output.
     pub jfa_primary_output: CachedTexture,
 
     // Bind group for jump flood passes targeting the secondary output.
-    pub jfa_secondary_bind_group: BindGroup,
+    pub jfa_from_primary_bind_group: BindGroup,
     // Secondary jump flood output.
     pub jfa_secondary_output: CachedTexture,
+
+    // Bind groups for the final jump flood pass.
+    pub jfa_final_output: CachedTexture,
 
     // Bind group layout for sampling JFA results in the outline shader.
     pub outline_src_bind_group_layout: BindGroupLayout,
     // Bind group layout for outline style parameters.
     pub outline_params_bind_group_layout: BindGroupLayout,
-    pub primary_outline_bind_group: BindGroup,
-    pub secondary_outline_bind_group: BindGroup,
+    pub outline_src_bind_group: BindGroup,
 }
 
 impl OutlineResources {
@@ -275,8 +281,10 @@ impl FromWorld for OutlineResources {
         let jfa_secondary_output_desc =
             tex_desc("outline_jfa_secondary_output", size, JFA_TEXTURE_FORMAT);
         let jfa_secondary_output = textures.get(&device, jfa_secondary_output_desc);
+        let jfa_final_output_desc = tex_desc("outline_jfa_final_output", size, JFA_TEXTURE_FORMAT);
+        let jfa_final_output = textures.get(&device, jfa_final_output_desc);
 
-        let jfa_primary_bind_group = create_jfa_bind_group(
+        let jfa_from_secondary_bind_group = create_jfa_bind_group(
             &device,
             &jfa_bind_group_layout,
             "outline_jfa_primary_bind_group",
@@ -284,7 +292,7 @@ impl FromWorld for OutlineResources {
             &jfa_secondary_output.default_view,
             &sampler,
         );
-        let jfa_secondary_bind_group = create_jfa_bind_group(
+        let jfa_from_primary_bind_group = create_jfa_bind_group(
             &device,
             &jfa_bind_group_layout,
             "outline_jfa_secondary_bind_group",
@@ -342,18 +350,11 @@ impl FromWorld for OutlineResources {
                 ],
             });
 
-        let primary_outline_bind_group = create_outline_src_bind_group(
+        let outline_src_bind_group = create_outline_src_bind_group(
             &device,
             &outline_src_bind_group_layout,
-            "jfa_primary_outline_src_bind_group",
-            &jfa_primary_output.default_view,
-            &sampler,
-        );
-        let secondary_outline_bind_group = create_outline_src_bind_group(
-            &device,
-            &outline_src_bind_group_layout,
-            "jfa_secondary_outline_src_bind_group",
-            &jfa_secondary_output.default_view,
+            "jfa_outline_src_bind_group",
+            &jfa_final_output.default_view,
             &sampler,
         );
 
@@ -369,14 +370,14 @@ impl FromWorld for OutlineResources {
             sampler,
             jfa_distance_buffer,
             jfa_distance_offsets,
-            jfa_primary_bind_group,
             jfa_primary_output,
-            jfa_secondary_bind_group,
             jfa_secondary_output,
+            jfa_final_output,
+            jfa_from_secondary_bind_group,
+            jfa_from_primary_bind_group,
             outline_src_bind_group_layout,
             outline_params_bind_group_layout,
-            primary_outline_bind_group,
-            secondary_outline_bind_group,
+            outline_src_bind_group,
         }
     }
 }
@@ -445,17 +446,10 @@ pub fn recreate_outline_resources(
     let jfa_primary_output = textures.get(&device, jfa_primary_desc);
     if jfa_primary_output.texture.id() != old_jfa_primary {
         outline.jfa_primary_output = jfa_primary_output;
-        outline.jfa_secondary_bind_group = outline.create_jfa_bind_group(
+        outline.jfa_from_primary_bind_group = outline.create_jfa_bind_group(
             &device,
-            "outline_jfa_secondary_bind_group",
+            JFA_FROM_PRIMARY,
             &outline.jfa_primary_output.default_view,
-        );
-        outline.primary_outline_bind_group = create_outline_src_bind_group(
-            &device,
-            &outline.outline_src_bind_group_layout,
-            "jfa_primary_outline_bind_group",
-            &outline.jfa_primary_output.default_view,
-            &outline.sampler,
         );
     }
 
@@ -464,16 +458,23 @@ pub fn recreate_outline_resources(
     let jfa_secondary_output = textures.get(&device, jfa_secondary_desc);
     if jfa_secondary_output.texture.id() != old_jfa_secondary {
         outline.jfa_secondary_output = jfa_secondary_output;
-        outline.jfa_primary_bind_group = outline.create_jfa_bind_group(
+        outline.jfa_from_secondary_bind_group = outline.create_jfa_bind_group(
             &device,
-            "outline_jfa_primary_bind_group",
+            JFA_FROM_SECONDARY,
             &outline.jfa_secondary_output.default_view,
         );
-        outline.secondary_outline_bind_group = create_outline_src_bind_group(
+    }
+
+    let old_jfa_final = outline.jfa_final_output.texture.id();
+    let jfa_final_desc = tex_desc("outline_jfa_final_output", size, JFA_TEXTURE_FORMAT);
+    let jfa_final_output = textures.get(&device, jfa_final_desc);
+    if jfa_final_output.texture.id() != old_jfa_final {
+        outline.jfa_final_output = jfa_final_output;
+        outline.outline_src_bind_group = create_outline_src_bind_group(
             &device,
             &outline.outline_src_bind_group_layout,
-            "jfa_secondary_outline_bind_group",
-            &outline.jfa_secondary_output.default_view,
+            JFA_OUTLINE_SRC,
+            &outline.jfa_final_output.default_view,
             &outline.sampler,
         );
     }

@@ -36,7 +36,9 @@ fn fragment(in: FragmentIn) -> [[location(0)]] vec4<f32> {
     // represent the same position due to storage as fp16, so an epsilon is
     // needed.
     let fade = clamp(params.weight - mag, 0.0, 1.0);
-    if (mag >= 0.5 && fade != 0.0) {
+    if (mag > 0.5 && mag < 1.0) {
+        return vec4<f32>(params.color.rgb, 0.5);
+    } else if (mag >= 1.0 && fade != 0.0) {
         return vec4<f32>(params.color.rgb, fade);
     } else {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);
