@@ -61,7 +61,7 @@ fn setup(
             enabled: true,
             style: outline_styles.add(OutlineStyle {
                 color: Color::hex("b4a2c8").unwrap(),
-                width: 16.0,
+                width: 24.0,
             }),
         });
 
