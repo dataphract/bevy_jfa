@@ -1,7 +1,14 @@
 [package]
 name = "bevy_jfa"
-description = "The Jump Flooding Algorithm (JFA) for Bevy."
+description = "The jump flooding algorithm (JFA) for Bevy"
+keywords = ["bevy", "jfa", "outline", "graphics"]
+categories = ["game-development", "graphics"]
 authors = ["dataphract"]
+license = "MIT OR Apache-2.0"
+documentation = "https://docs.rs/bevy_jfa"
+repository = "https://github.com/dataphract/bevy_jfa"
+readme = "README.md"
+
 version = "0.1.0"
 edition = "2021"
 resolver = "2"
@@ -10,12 +17,12 @@ resolver = "2"
 default = ["wgpu-profiler"]
 
 [dependencies]
-#bevy = { git = "https://github.com/bevyengine/bevy.git", rev = "a0af066" }
 bitflags = "1"
 wgpu-profiler = { version = "0.8", optional = true }
 
 [dependencies.bevy]
-path = "../bevy"
+git = "https://github.com/bevyengine/bevy"
+rev = "f969c62"
 default-features = false
 features = [
     "bevy_core_pipeline",
