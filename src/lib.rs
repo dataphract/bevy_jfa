@@ -59,6 +59,29 @@ const FULLSCREEN_PRIMITIVE_STATE: PrimitiveState = PrimitiveState {
 #[derive(Default)]
 pub struct OutlinePlugin;
 
+#[derive(Clone)]
+pub struct OutlineSettings {
+    pub(crate) half_resolution: bool,
+}
+
+impl OutlineSettings {
+    pub fn half_resolution(&self) -> bool {
+        self.half_resolution
+    }
+
+    pub fn set_half_resolution(&mut self, value: bool) {
+        self.half_resolution = value;
+    }
+}
+
+impl Default for OutlineSettings {
+    fn default() -> Self {
+        Self {
+            half_resolution: false,
+        }
+    }
+}
+
 const MASK_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 10400755559809425757);
 const JFA_INIT_SHADER_HANDLE: HandleUntyped =
@@ -77,7 +100,8 @@ use crate::graph::outline as outline_graph;
 impl Plugin for OutlinePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(RenderAssetPlugin::<OutlineStyle>::default())
-            .add_asset::<OutlineStyle>();
+            .add_asset::<OutlineStyle>()
+            .init_resource::<OutlineSettings>();
 
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
 
@@ -113,6 +137,7 @@ impl Plugin for OutlinePlugin {
             .init_resource::<jfa::JfaPipeline>()
             .init_resource::<outline::OutlinePipeline>()
             .init_resource::<SpecializedRenderPipelines<outline::OutlinePipeline>>()
+            .add_system_to_stage(RenderStage::Extract, extract_outline_settings)
             .add_system_to_stage(RenderStage::Extract, extract_camera_outlines)
             .add_system_to_stage(RenderStage::Extract, extract_mask_camera_phase)
             .add_system_to_stage(RenderStage::Prepare, resources::recreate_outline_resources)
@@ -232,6 +257,10 @@ pub struct CameraOutline {
 #[derive(Clone, Debug, PartialEq, Component)]
 pub struct Outline {
     pub enabled: bool,
+}
+
+fn extract_outline_settings(mut commands: Commands, settings: Res<OutlineSettings>) {
+    commands.insert_resource(settings.clone());
 }
 
 fn extract_camera_outlines(

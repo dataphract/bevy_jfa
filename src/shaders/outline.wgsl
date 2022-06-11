@@ -10,7 +10,9 @@ struct Params {
 [[group(1), binding(0)]]
 var jfa_buffer: texture_2d<f32>;
 [[group(1), binding(1)]]
-var jfa_sampler: sampler;
+var mask_buffer: texture_2d<f32>;
+[[group(1), binding(2)]]
+var nearest_sampler: sampler;
 
 [[group(2), binding(0)]]
 var<uniform> params: Params;
@@ -21,8 +23,10 @@ struct FragmentIn {
 
 [[stage(fragment)]]
 fn fragment(in: FragmentIn) -> [[location(0)]] vec4<f32> {
-    let fb_jfa_pos = textureSample(jfa_buffer, jfa_sampler, in.texcoord).xy;
+    let fb_jfa_pos = textureSample(jfa_buffer, nearest_sampler, in.texcoord).xy;
     let fb_to_pix = vec2<f32>(dims.width, dims.height);
+
+    let mask_value = textureSample(mask_buffer, nearest_sampler, in.texcoord).r;
 
     // Fragment position in pixel space.
     let pix_coord = in.texcoord * fb_to_pix;
@@ -35,11 +39,13 @@ fn fragment(in: FragmentIn) -> [[location(0)]] vec4<f32> {
     // Computed texcoord and stored texcoord are likely to differ even if they
     // represent the same position due to storage as fp16, so an epsilon is
     // needed.
-    let fade = clamp(params.weight - mag, 0.0, 1.0);
-    if (mag > 0.5 && mag < 1.0) {
-        return vec4<f32>(params.color.rgb, 0.5);
-    } else if (mag >= 1.0 && fade != 0.0) {
-        return vec4<f32>(params.color.rgb, fade);
+    if (mask_value < 1.0) {
+        if (mask_value > 0.0) {
+            return vec4<f32>(params.color.rgb, 1.0 - mask_value);
+        } else {
+            let fade = clamp(params.weight - mag, 0.0, 1.0);
+            return vec4<f32>(params.color.rgb, fade);
+        }
     } else {
         return vec4<f32>(0.0, 0.0, 0.0, 0.0);
     }

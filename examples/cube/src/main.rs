@@ -1,5 +1,8 @@
-use bevy::prelude::*;
-use bevy_jfa::{CameraOutline, Outline, OutlinePlugin, OutlineStyle};
+use bevy::{
+    input::{keyboard::KeyboardInput, ButtonState},
+    prelude::*,
+};
+use bevy_jfa::{CameraOutline, Outline, OutlinePlugin, OutlineSettings, OutlineStyle};
 
 #[derive(Clone, Debug, Component)]
 struct RotationAxis(Vec3);
@@ -83,11 +86,21 @@ fn rotate_cube(time: Res<Time>, mut query: Query<(&mut Transform, &RotationAxis)
     }
 }
 
+fn handle_keys(mut settings: ResMut<OutlineSettings>, mut keys: EventReader<KeyboardInput>) {
+    for ev in keys.iter() {
+        if ev.key_code == Some(KeyCode::R) && ev.state == ButtonState::Pressed {
+            let old = settings.half_resolution();
+            settings.set_half_resolution(!old);
+        }
+    }
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugin(OutlinePlugin)
         .add_startup_system(setup)
         .add_system(rotate_cube)
+        .add_system(handle_keys)
         .run();
 }
