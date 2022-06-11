@@ -1,11 +1,23 @@
 //! A Bevy library for computing the Jump Flooding Algorithm.
 //!
 //! The **jump flooding algorithm** (JFA) is a fast screen-space algorithm for
-//! computing distance fields.
+//! computing distance fields. Currently, this crate provides a plugin for
+//! adding outlines to arbitrary meshes.
 //!
 //! Outlines adapted from ["The Quest for Very Wide Outlines" by Ben Golus][0].
 //!
 //! [0]: https://bgolus.medium.com/the-quest-for-very-wide-outlines-ba82ed442cd9
+//!
+//! # Setup
+//!
+//! To add an outline to a mesh:
+//!
+//! 1. Add the [`OutlinePlugin`] to the base `App`.
+//! 2. Add the desired [`OutlineStyle`] as an `Asset`.
+//! 3. Add a [`CameraOutline`] component with the desired `OutlineStyle` to the
+//!    camera which should render the outline.  Currently, outline styling is
+//!    tied to the camera rather than the mesh.
+//! 4. Add an [`Outline`] component to the mesh with `enabled: true`.
 
 use bevy::{
     app::prelude::*,
@@ -56,19 +68,23 @@ const FULLSCREEN_PRIMITIVE_STATE: PrimitiveState = PrimitiveState {
     conservative: false,
 };
 
+/// Top-level plugin for enabling outlines.
 #[derive(Default)]
 pub struct OutlinePlugin;
 
+/// Performance and visual quality settings for JFA-based outlines.
 #[derive(Clone)]
 pub struct OutlineSettings {
     pub(crate) half_resolution: bool,
 }
 
 impl OutlineSettings {
+    /// Returns whether the half-resolution setting is enabled.
     pub fn half_resolution(&self) -> bool {
         self.half_resolution
     }
 
+    /// Sets whether the half-resolution setting is enabled.
     pub fn set_half_resolution(&mut self, value: bool) {
         self.half_resolution = value;
     }
@@ -203,6 +219,7 @@ type DrawMeshMask = (
     DrawMesh,
 );
 
+/// Visual style for an outline.
 #[derive(Clone, Debug, PartialEq, TypeUuid)]
 #[uuid = "256fd556-e497-4df2-8d9c-9bdb1419ee90"]
 pub struct OutlineStyle {
