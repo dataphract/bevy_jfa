@@ -1,0 +1,7 @@
+[workspace]
+members = ["*"]
+exclude = ["target"]
+resolver = "2"
+
+[profile.dev]
+opt-level = 3

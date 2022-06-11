@@ -1,5 +1,8 @@
 //! A Bevy library for computing the Jump Flooding Algorithm.
 //!
+//! The **jump flooding algorithm** (JFA) is a fast screen-space algorithm for
+//! computing distance fields.
+//!
 //! Outlines adapted from ["The Quest for Very Wide Outlines" by Ben Golus][0].
 //!
 //! [0]: https://bgolus.medium.com/the-quest-for-very-wide-outlines-ba82ed442cd9
@@ -7,6 +10,7 @@
 use bevy::{
     app::prelude::*,
     asset::{Assets, Handle, HandleUntyped},
+    core_pipeline::core_3d,
     ecs::{prelude::*, system::SystemParamItem},
     pbr::{DrawMesh, MeshPipelineKey, MeshUniform, SetMeshBindGroup, SetMeshViewBindGroup},
     prelude::{AddAsset, Camera3d},
@@ -21,18 +25,20 @@ use bevy::{
         },
         render_resource::*,
         renderer::{RenderDevice, RenderQueue},
-        texture::BevyDefault,
         view::{ExtractedView, VisibleEntities},
         RenderApp, RenderStage,
     },
     utils::FloatOrd,
 };
-use jfa::JfaNode;
-use jfa_init::JfaInitNode;
-use mask::{MeshMaskNode, MeshMaskPipeline};
-use outline::{GpuOutlineParams, OutlineNode, OutlineParams};
-use resources::OutlineResources;
 
+use crate::{
+    graph::OutlineDriverNode,
+    mask::MeshMaskPipeline,
+    outline::{GpuOutlineParams, OutlineParams},
+    resources::OutlineResources,
+};
+
+mod graph;
 mod jfa;
 mod jfa_init;
 mod mask;
@@ -66,18 +72,7 @@ const OUTLINE_SHADER_HANDLE: HandleUntyped =
 const DIMENSIONS_SHADER_HANDLE: HandleUntyped =
     HandleUntyped::weak_from_u64(Shader::TYPE_UUID, 11721531257850828867);
 
-mod outline_graph {
-    pub mod input {
-        pub const VIEW_ENTITY: &str = "view_entity";
-    }
-
-    pub mod node {
-        pub const MASK_PASS: &str = "mask_pass";
-        pub const JFA_INIT_PASS: &str = "jfa_init_pass";
-        pub const JFA_PASS: &str = "jfa_pass";
-        pub const OUTLINE_PASS: &str = "outline_pass";
-    }
-}
+use crate::graph::outline as outline_graph;
 
 impl Plugin for OutlinePlugin {
     fn build(&self, app: &mut App) {
@@ -85,19 +80,21 @@ impl Plugin for OutlinePlugin {
             .add_asset::<OutlineStyle>();
 
         let mut shaders = app.world.get_resource_mut::<Assets<Shader>>().unwrap();
+
         let mask_shader = Shader::from_wgsl(include_str!("shaders/mask.wgsl"));
-        shaders.set_untracked(MASK_SHADER_HANDLE, mask_shader);
         let jfa_init_shader = Shader::from_wgsl(include_str!("shaders/jfa_init.wgsl"));
-        shaders.set_untracked(JFA_INIT_SHADER_HANDLE, jfa_init_shader);
         let jfa_shader = Shader::from_wgsl(include_str!("shaders/jfa.wgsl"));
-        shaders.set_untracked(JFA_SHADER_HANDLE, jfa_shader);
         let fullscreen_shader = Shader::from_wgsl(include_str!("shaders/fullscreen.wgsl"))
             .with_import_path("outline::fullscreen");
-        shaders.set_untracked(FULLSCREEN_SHADER_HANDLE, fullscreen_shader);
         let outline_shader = Shader::from_wgsl(include_str!("shaders/outline.wgsl"));
-        shaders.set_untracked(OUTLINE_SHADER_HANDLE, outline_shader);
         let dimensions_shader = Shader::from_wgsl(include_str!("shaders/dimensions.wgsl"))
             .with_import_path("outline::dimensions");
+
+        shaders.set_untracked(MASK_SHADER_HANDLE, mask_shader);
+        shaders.set_untracked(JFA_INIT_SHADER_HANDLE, jfa_init_shader);
+        shaders.set_untracked(JFA_SHADER_HANDLE, jfa_shader);
+        shaders.set_untracked(FULLSCREEN_SHADER_HANDLE, fullscreen_shader);
+        shaders.set_untracked(OUTLINE_SHADER_HANDLE, outline_shader);
         shaders.set_untracked(DIMENSIONS_SHADER_HANDLE, dimensions_shader);
 
         let render_app = match app.get_sub_app_mut(RenderApp) {
@@ -121,61 +118,24 @@ impl Plugin for OutlinePlugin {
             .add_system_to_stage(RenderStage::Prepare, resources::recreate_outline_resources)
             .add_system_to_stage(RenderStage::Queue, queue_mesh_masks);
 
-        let mask_node = MeshMaskNode::new(&mut render_app.world);
-        // TODO: BevyDefault for surface texture format is an anti-pattern;
-        // the target texture format should be queried from the window when
-        // Bevy exposes that functionality.
-        let outline_node = OutlineNode::new(&mut render_app.world, TextureFormat::bevy_default());
+        let outline_graph = graph::outline(render_app).unwrap();
 
         let mut root_graph = render_app.world.resource_mut::<RenderGraph>();
-        let draw_3d_graph = root_graph
-            .get_sub_graph_mut(bevy::core_pipeline::core_3d::graph::NAME)
-            .unwrap();
+        let draw_3d_graph = root_graph.get_sub_graph_mut(core_3d::graph::NAME).unwrap();
+        let draw_3d_input = draw_3d_graph.input_node().unwrap().id;
 
-        let input_node_id = draw_3d_graph.input_node().unwrap().id;
-        draw_3d_graph.add_node(outline_graph::node::MASK_PASS, mask_node);
+        draw_3d_graph.add_sub_graph(outline_graph::NAME, outline_graph);
+        let outline_driver = draw_3d_graph.add_node(OutlineDriverNode::NAME, OutlineDriverNode);
         draw_3d_graph
             .add_slot_edge(
-                input_node_id,
-                outline_graph::input::VIEW_ENTITY,
-                outline_graph::node::MASK_PASS,
-                MeshMaskNode::IN_VIEW,
-            )
-            .unwrap();
-        draw_3d_graph.add_node(outline_graph::node::JFA_INIT_PASS, JfaInitNode);
-        draw_3d_graph
-            .add_slot_edge(
-                outline_graph::node::MASK_PASS,
-                MeshMaskNode::OUT_MASK,
-                outline_graph::node::JFA_INIT_PASS,
-                JfaInitNode::IN_MASK,
-            )
-            .unwrap();
-        draw_3d_graph.add_node(outline_graph::node::JFA_PASS, JfaNode);
-        draw_3d_graph
-            .add_slot_edge(
-                outline_graph::node::JFA_INIT_PASS,
-                JfaInitNode::OUT_JFA_INIT,
-                outline_graph::node::JFA_PASS,
-                JfaNode::IN_BASE,
-            )
-            .unwrap();
-        draw_3d_graph.add_node(outline_graph::node::OUTLINE_PASS, outline_node);
-        draw_3d_graph
-            .add_slot_edge(
-                input_node_id,
-                outline_graph::input::VIEW_ENTITY,
-                outline_graph::node::OUTLINE_PASS,
-                OutlineNode::IN_VIEW,
+                draw_3d_input,
+                core_3d::graph::input::VIEW_ENTITY,
+                outline_driver,
+                OutlineDriverNode::INPUT_VIEW,
             )
             .unwrap();
         draw_3d_graph
-            .add_slot_edge(
-                outline_graph::node::JFA_PASS,
-                JfaNode::OUT_JUMP,
-                outline_graph::node::OUTLINE_PASS,
-                OutlineNode::IN_JFA,
-            )
+            .add_node_edge(core_3d::graph::node::MAIN_PASS, outline_driver)
             .unwrap();
     }
 }

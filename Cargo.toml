@@ -4,15 +4,24 @@ description = "The Jump Flooding Algorithm (JFA) for Bevy."
 authors = ["dataphract"]
 version = "0.1.0"
 edition = "2021"
+resolver = "2"
 
 [features]
 default = ["wgpu-profiler"]
 
 [dependencies]
 #bevy = { git = "https://github.com/bevyengine/bevy.git", rev = "a0af066" }
-bevy = { path = "../bevy" }
 bitflags = "1"
 wgpu-profiler = { version = "0.8", optional = true }
+
+[dependencies.bevy]
+path = "../bevy"
+default-features = false
+features = [
+    "bevy_core_pipeline",
+    "bevy_pbr",
+    "bevy_render",
+]
 
 [profile.dev]
 opt-level = 3

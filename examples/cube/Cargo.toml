@@ -1,0 +1,9 @@
+[package]
+name = "cube"
+authors = ["dataphract"]
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = { path = "../../../bevy" }
+bevy_jfa = { path = "../.." }
