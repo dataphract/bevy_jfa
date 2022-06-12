@@ -26,9 +26,9 @@ use crate::{
 #[derive(Clone, Debug, Default, PartialEq, ShaderType)]
 pub struct OutlineParams {
     // Outline color.
-    color: Vec4,
+    pub(crate) color: Vec4,
     // Outline weight in pixels.
-    weight: f32,
+    pub(crate) weight: f32,
 }
 
 impl OutlineParams {
@@ -40,6 +40,7 @@ impl OutlineParams {
 }
 
 pub struct GpuOutlineParams {
+    pub(crate) params: OutlineParams,
     pub(crate) _buffer: UniformBuffer<OutlineParams>,
     pub(crate) bind_group: BindGroup,
 }

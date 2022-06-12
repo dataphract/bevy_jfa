@@ -1,6 +1,7 @@
 use bevy::{
     prelude::*,
     render::{
+        render_asset::RenderAssets,
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_phase::TrackedRenderPass,
         render_resource::{
@@ -13,7 +14,8 @@ use bevy::{
 };
 
 use crate::{
-    resources::OutlineResources, FULLSCREEN_PRIMITIVE_STATE, JFA_SHADER_HANDLE, JFA_TEXTURE_FORMAT,
+    resources::OutlineResources, CameraOutline, OutlineStyle, FULLSCREEN_PRIMITIVE_STATE,
+    JFA_SHADER_HANDLE, JFA_TEXTURE_FORMAT,
 };
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, ShaderType)]
@@ -78,20 +80,38 @@ impl FromWorld for JfaPipeline {
     }
 }
 
-pub struct JfaNode;
+pub struct JfaNode {
+    query: QueryState<&'static CameraOutline>,
+}
+
+impl FromWorld for JfaNode {
+    fn from_world(world: &mut World) -> Self {
+        JfaNode {
+            query: QueryState::from_world(world),
+        }
+    }
+}
 
 impl JfaNode {
+    pub const IN_VIEW: &'static str = "in_view";
     pub const IN_BASE: &'static str = "in_base";
     pub const OUT_JUMP: &'static str = "out_jump";
 }
 
 impl Node for JfaNode {
     fn input(&self) -> Vec<SlotInfo> {
-        vec![SlotInfo::new(Self::IN_BASE, SlotType::TextureView)]
+        vec![
+            SlotInfo::new(Self::IN_VIEW, SlotType::Entity),
+            SlotInfo::new(Self::IN_BASE, SlotType::TextureView),
+        ]
     }
 
     fn output(&self) -> Vec<SlotInfo> {
         vec![SlotInfo::new(Self::OUT_JUMP, SlotType::TextureView)]
+    }
+
+    fn update(&mut self, world: &mut World) {
+        self.query.update_archetypes(world);
     }
 
     fn run(
@@ -100,13 +120,24 @@ impl Node for JfaNode {
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), NodeRunError> {
-        let res = world.get_resource::<OutlineResources>().unwrap();
+        let res = world.resource::<OutlineResources>();
         graph
-            .set_output(
-                Self::OUT_JUMP,
-                res.jfa_secondary_output.default_view.clone(),
-            )
+            .set_output(Self::OUT_JUMP, res.jfa_final_output.default_view.clone())
             .unwrap();
+
+        let styles = world.resource::<RenderAssets<OutlineStyle>>();
+        let width = match self
+            .query
+            .get_manual(world, graph.get_input_entity(Self::IN_VIEW)?)
+        {
+            Ok(outline) => {
+                let dims = res.dimensions_buffer.get();
+                dims.width
+                    .max(dims.height)
+                    .min(styles.get(&outline.style).unwrap().params.weight.ceil())
+            }
+            Err(_) => return Ok(()),
+        };
 
         let pipeline = world.get_resource::<JfaPipeline>().unwrap();
         let pipeline_cache = world.get_resource::<PipelineCache>().unwrap();
@@ -125,7 +156,8 @@ impl Node for JfaNode {
         // log2(weight + 1) < max_exp + 1
         // max_exp > log2(weight + 1) - 1
 
-        let max_exp = 8;
+        let max_exp = width.log2() as usize;
+        //let max_exp = width.log2().ceil() as usize;
         for it in 0..=max_exp {
             let exp = max_exp - it;
 

@@ -73,6 +73,7 @@ pub fn outline(render_app: &mut App) -> Result<RenderGraph, RenderGraphError> {
     // 4. Outline
 
     let mask_node = MeshMaskNode::new(&mut render_app.world);
+    let jfa_node = JfaNode::from_world(&mut render_app.world);
     // TODO: BevyDefault for surface texture format is an anti-pattern;
     // the target texture format should be queried from the window when
     // Bevy exposes that functionality.
@@ -80,7 +81,7 @@ pub fn outline(render_app: &mut App) -> Result<RenderGraph, RenderGraphError> {
 
     graph.add_node(outline::node::MASK_PASS, mask_node);
     graph.add_node(outline::node::JFA_INIT_PASS, JfaInitNode);
-    graph.add_node(outline::node::JFA_PASS, JfaNode);
+    graph.add_node(outline::node::JFA_PASS, jfa_node);
     graph.add_node(outline::node::OUTLINE_PASS, outline_node);
 
     // Input -> Mask
@@ -97,6 +98,14 @@ pub fn outline(render_app: &mut App) -> Result<RenderGraph, RenderGraphError> {
         MeshMaskNode::OUT_MASK,
         outline::node::JFA_INIT_PASS,
         JfaInitNode::IN_MASK,
+    )?;
+
+    // Input -> JFA
+    graph.add_slot_edge(
+        input_node_id,
+        outline::input::VIEW_ENTITY,
+        outline::node::JFA_PASS,
+        JfaNode::IN_VIEW,
     )?;
 
     // JFA Init -> JFA

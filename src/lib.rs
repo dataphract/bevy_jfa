@@ -244,7 +244,7 @@ impl RenderAsset for OutlineStyle {
         extracted_asset: Self::ExtractedAsset,
         (device, queue, outline_res): &mut SystemParamItem<Self::Param>,
     ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
-        let mut buffer = UniformBuffer::from(extracted_asset);
+        let mut buffer = UniformBuffer::from(extracted_asset.clone());
         buffer.write_buffer(device, queue);
 
         let bind_group = device.create_bind_group(&BindGroupDescriptor {
@@ -257,6 +257,7 @@ impl RenderAsset for OutlineStyle {
         });
 
         Ok(GpuOutlineParams {
+            params: extracted_asset,
             _buffer: buffer,
             bind_group,
         })

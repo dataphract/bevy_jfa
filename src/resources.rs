@@ -162,7 +162,7 @@ impl FromWorld for OutlineResources {
         let mask_output = textures.get(&device, mask_output_desc);
 
         let dims = jfa::Dimensions::new(size.width, size.height);
-        let mut dimensions_buffer = UniformBuffer::from(dims.clone());
+        let mut dimensions_buffer = UniformBuffer::from(dims);
         dimensions_buffer.write_buffer(&device, &queue);
 
         let dimensions_bind_group_layout =
