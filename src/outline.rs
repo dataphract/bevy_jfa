@@ -127,11 +127,11 @@ impl SpecializedRenderPipeline for OutlinePipeline {
                 shader: OUTLINE_SHADER_HANDLE.typed::<Shader>(),
                 shader_defs: vec![],
                 entry_point: "fragment".into(),
-                targets: vec![ColorTargetState {
+                targets: vec![Some(ColorTargetState {
                     format: key.format,
                     blend: Some(blend),
                     write_mask: ColorWrites::ALL,
-                }],
+                })],
             }),
             primitive: FULLSCREEN_PRIMITIVE_STATE,
             depth_stencil: None,
@@ -229,14 +229,14 @@ impl Node for OutlineNode {
             .command_encoder
             .begin_render_pass(&RenderPassDescriptor {
                 label: Some("jfa_outline"),
-                color_attachments: &[RenderPassColorAttachment {
+                color_attachments: &[Some(RenderPassColorAttachment {
                     view: target_view,
                     resolve_target: None,
                     ops: Operations {
                         load: LoadOp::Load,
                         store: true,
                     },
-                }],
+                })],
                 // TODO: support outlines being occluded by world geometry
                 depth_stencil_attachment: None,
             });

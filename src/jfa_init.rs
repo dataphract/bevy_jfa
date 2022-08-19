@@ -50,11 +50,11 @@ impl FromWorld for JfaInitPipeline {
                 shader: JFA_INIT_SHADER_HANDLE.typed::<Shader>(),
                 shader_defs: vec![],
                 entry_point: "fragment".into(),
-                targets: vec![ColorTargetState {
+                targets: vec![Some(ColorTargetState {
                     format: JFA_TEXTURE_FORMAT,
                     blend: None,
                     write_mask: ColorWrites::ALL,
-                }],
+                })],
             }),
         });
 
@@ -119,7 +119,7 @@ impl Node for JfaInitNode {
             .command_encoder
             .begin_render_pass(&RenderPassDescriptor {
                 label: Some("outline_jfa_init"),
-                color_attachments: &[RenderPassColorAttachment {
+                color_attachments: &[Some(RenderPassColorAttachment {
                     view: &res.jfa_primary_output.default_view,
                     resolve_target: None,
                     ops: Operations {
@@ -134,7 +134,7 @@ impl Node for JfaInitNode {
                         ),
                         store: true,
                     },
-                }],
+                })],
                 depth_stencil_attachment: None,
             });
         let mut tracked_pass = TrackedRenderPass::new(render_pass);

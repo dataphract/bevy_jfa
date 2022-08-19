@@ -4,22 +4,22 @@
 // Bind group 0 imported from outline::dimensions
 
 struct JumpDist {
-    dist: u32;
+    dist: u32,
 };
 
-[[group(1), binding(0)]]
+@group(1) @binding(0)
 var<uniform> jump_dist: JumpDist;
-[[group(1), binding(1)]]
+@group(1) @binding(1)
 var src_buffer: texture_2d<f32>;
-[[group(1), binding(2)]]
+@group(1) @binding(2)
 var src_sampler: sampler;
 
 struct FragmentIn {
-    [[location(0)]] texcoord: vec2<f32>;
+    @location(0) texcoord: vec2<f32>,
 };
 
-[[stage(fragment)]]
-fn fragment(in: FragmentIn) -> [[location(0)]] vec4<f32> {
+@fragment
+fn fragment(in: FragmentIn) -> @location(0) vec4<f32> {
     // Scaling factor to convert framebuffer to pixel coordinates.
     let fb_to_pix = vec2<f32>(dims.width, dims.height);
     // Pixel coordinates of this fragment.
