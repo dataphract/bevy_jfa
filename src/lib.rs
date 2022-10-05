@@ -28,6 +28,7 @@ use bevy::{
     prelude::{AddAsset, Camera3d},
     reflect::TypeUuid,
     render::{
+        extract_resource::ExtractResource,
         prelude::*,
         render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssets},
         render_graph::RenderGraph,
@@ -38,7 +39,7 @@ use bevy::{
         render_resource::*,
         renderer::{RenderDevice, RenderQueue},
         view::{ExtractedView, VisibleEntities},
-        RenderApp, RenderStage,
+        Extract, RenderApp, RenderStage,
     },
     utils::FloatOrd,
 };
@@ -73,7 +74,7 @@ const FULLSCREEN_PRIMITIVE_STATE: PrimitiveState = PrimitiveState {
 pub struct OutlinePlugin;
 
 /// Performance and visual quality settings for JFA-based outlines.
-#[derive(Clone)]
+#[derive(Clone, ExtractResource)]
 pub struct OutlineSettings {
     pub(crate) half_resolution: bool,
 }
@@ -277,14 +278,14 @@ pub struct Outline {
     pub enabled: bool,
 }
 
-fn extract_outline_settings(mut commands: Commands, settings: Res<OutlineSettings>) {
+fn extract_outline_settings(mut commands: Commands, settings: Extract<Res<OutlineSettings>>) {
     commands.insert_resource(settings.clone());
 }
 
 fn extract_camera_outlines(
     mut commands: Commands,
     mut previous_outline_len: Local<usize>,
-    cam_outline_query: Query<(Entity, &CameraOutline), With<Camera>>,
+    cam_outline_query: Extract<Query<(Entity, &CameraOutline), With<Camera>>>,
 ) {
     let mut batches = Vec::with_capacity(*previous_outline_len);
     batches.extend(
@@ -298,7 +299,7 @@ fn extract_camera_outlines(
 
 fn extract_mask_camera_phase(
     mut commands: Commands,
-    cameras: Query<Entity, (With<Camera3d>, With<CameraOutline>)>,
+    cameras: Extract<Query<Entity, (With<Camera3d>, With<CameraOutline>)>>,
 ) {
     for entity in cameras.iter() {
         commands

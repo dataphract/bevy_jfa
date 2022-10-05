@@ -50,11 +50,11 @@ impl SpecializedMeshPipeline for MeshMaskPipeline {
             shader: MASK_SHADER_HANDLE.typed::<Shader>(),
             shader_defs: vec![],
             entry_point: "fragment".into(),
-            targets: vec![ColorTargetState {
+            targets: vec![Some(ColorTargetState {
                 format: TextureFormat::R8Unorm,
                 blend: None,
                 write_mask: ColorWrites::ALL,
-            }],
+            })],
         });
         desc.depth_stencil = None;
 
@@ -126,14 +126,14 @@ impl Node for MeshMaskNode {
             .command_encoder
             .begin_render_pass(&RenderPassDescriptor {
                 label: Some("outline_stencil_render_pass"),
-                color_attachments: &[RenderPassColorAttachment {
+                color_attachments: &[Some(RenderPassColorAttachment {
                     view: &res.mask_multisample.default_view,
                     resolve_target: Some(&res.mask_output.default_view),
                     ops: Operations {
                         load: LoadOp::Clear(Color::BLACK.into()),
                         store: true,
                     },
-                }],
+                })],
                 depth_stencil_attachment: None,
             });
         let mut pass = TrackedRenderPass::new(pass_raw);

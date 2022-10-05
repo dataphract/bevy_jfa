@@ -2,27 +2,27 @@
 #import outline::dimensions
 
 struct Params {
-    color: vec4<f32>;
+    color: vec4<f32>,
     // Outline weight in pixels.
-    weight: f32;
+    weight: f32,
 };
 
-[[group(1), binding(0)]]
+@group(1) @binding(0)
 var jfa_buffer: texture_2d<f32>;
-[[group(1), binding(1)]]
+@group(1) @binding(1)
 var mask_buffer: texture_2d<f32>;
-[[group(1), binding(2)]]
+@group(1) @binding(2)
 var nearest_sampler: sampler;
 
-[[group(2), binding(0)]]
+@group(2) @binding(0)
 var<uniform> params: Params;
 
 struct FragmentIn {
-    [[location(0)]] texcoord: vec2<f32>;
+    @location(0) texcoord: vec2<f32>,
 };
 
-[[stage(fragment)]]
-fn fragment(in: FragmentIn) -> [[location(0)]] vec4<f32> {
+@fragment
+fn fragment(in: FragmentIn) -> @location(0) vec4<f32> {
     let fb_jfa_pos = textureSample(jfa_buffer, nearest_sampler, in.texcoord).xy;
     let fb_to_pix = vec2<f32>(dims.width, dims.height);
 

@@ -1,6 +1,6 @@
 struct Vertex {
-    pos: vec2<f32>;
-    texcoord: vec2<f32>;
+    pos: vec2<f32>,
+    texcoord: vec2<f32>,
 };
 
 // This forms a CCW triangle larger than the screen:
@@ -38,21 +38,21 @@ let VERTICES: array<Vertex, 3> = array<Vertex, 3>(
 );
 
 struct VertexOut {
-    [[builtin(position)]] pos: vec4<f32>;
-    [[location(0)]] texcoord: vec2<f32>;
+    @builtin(position) pos: vec4<f32>,
+    @location(0) texcoord: vec2<f32>,
 };
 
-[[stage(vertex)]]
-fn vertex([[builtin(vertex_index)]] idx: u32) -> VertexOut {
+@vertex
+fn vertex(@builtin(vertex_index) idx: u32) -> VertexOut {
     var v: Vertex;
     switch (idx % 3u) {
-        case 0: {
+        case 0u: {
             v = VERTICES[0];
         }
-        case 1: {
+        case 1u: {
             v = VERTICES[1];
         }
-        case 2: {
+        case 2u: {
             v = VERTICES[2];
         }
 
