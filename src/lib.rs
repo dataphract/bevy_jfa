@@ -321,12 +321,6 @@ fn extract_mask_camera_phase(
     }
 }
 
-fn extract_outline_mesh(mut commands: Commands, cameras: Extract<Query<(Entity, &Outline)>>) {
-    for (entity, outline) in cameras.iter() {
-        commands.get_or_spawn(entity).insert(outline.clone());
-    }
-}
-
 fn queue_mesh_masks(
     mesh_mask_draw_functions: Res<DrawFunctions<MeshMask>>,
     mesh_mask_pipeline: Res<MeshMaskPipeline>,
