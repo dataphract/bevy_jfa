@@ -1,7 +1,6 @@
 use bevy::{
     prelude::*,
     render::{
-        camera::ExtractedCamera,
         render_asset::RenderAssets,
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
         render_phase::TrackedRenderPass,
@@ -14,7 +13,7 @@ use bevy::{
             UniformBuffer, VertexState,
         },
         renderer::RenderContext,
-        view::ExtractedWindows,
+        view::ViewTarget,
     },
 };
 
@@ -146,7 +145,7 @@ impl SpecializedRenderPipeline for OutlinePipeline {
 
 pub struct OutlineNode {
     pipeline_id: CachedRenderPipelineId,
-    query: QueryState<(&'static ExtractedCamera, &'static CameraOutline)>,
+    query: QueryState<(&'static ViewTarget, &'static CameraOutline)>,
 }
 
 impl OutlineNode {
@@ -202,16 +201,12 @@ impl Node for OutlineNode {
         render_context: &mut RenderContext,
         world: &World,
     ) -> Result<(), NodeRunError> {
-        let view_ent = graph.get_input_entity(Self::IN_VIEW)?;
-        graph.set_output(Self::OUT_VIEW, view_ent)?;
+        let view_entity = graph.get_input_entity(Self::IN_VIEW)?;
+        graph.set_output(Self::OUT_VIEW, view_entity)?;
 
-        let (camera, outline) = &self.query.get_manual(world, view_ent).unwrap();
-
-        let windows = world.resource::<ExtractedWindows>();
-        let images = world.resource::<RenderAssets<Image>>();
-        let target_view = match camera.target.get_texture_view(windows, images) {
-            Some(v) => v,
-            None => return Ok(()),
+        let (view_target, outline) = match self.query.get_manual(world, view_entity) {
+            Ok(result) => result,
+            Err(_) => return Ok(()),
         };
 
         let styles = world.resource::<RenderAssets<OutlineStyle>>();
@@ -230,7 +225,7 @@ impl Node for OutlineNode {
             .begin_render_pass(&RenderPassDescriptor {
                 label: Some("jfa_outline"),
                 color_attachments: &[Some(RenderPassColorAttachment {
-                    view: target_view,
+                    view: &view_target.view,
                     resolve_target: None,
                     ops: Operations {
                         load: LoadOp::Load,
