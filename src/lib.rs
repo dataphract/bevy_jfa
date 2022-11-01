@@ -28,6 +28,7 @@ use bevy::{
     prelude::{AddAsset, Camera3d},
     reflect::TypeUuid,
     render::{
+        extract_component::{ExtractComponent, ExtractComponentPlugin},
         extract_resource::ExtractResource,
         prelude::*,
         render_asset::{PrepareAssetError, RenderAsset, RenderAssetPlugin, RenderAssets},
@@ -137,6 +138,8 @@ impl Plugin for OutlinePlugin {
         shaders.set_untracked(FULLSCREEN_SHADER_HANDLE, fullscreen_shader);
         shaders.set_untracked(OUTLINE_SHADER_HANDLE, outline_shader);
         shaders.set_untracked(DIMENSIONS_SHADER_HANDLE, dimensions_shader);
+
+        app.add_plugin(ExtractComponentPlugin::<Outline>::default());
 
         let render_app = match app.get_sub_app_mut(RenderApp) {
             Ok(r) => r,
@@ -278,6 +281,16 @@ pub struct Outline {
     pub enabled: bool,
 }
 
+impl ExtractComponent for Outline {
+    type Query = &'static Self;
+
+    type Filter = ();
+
+    fn extract_component(item: bevy::ecs::query::QueryItem<Self::Query>) -> Self {
+        item.clone()
+    }
+}
+
 fn extract_outline_settings(mut commands: Commands, settings: Extract<Res<OutlineSettings>>) {
     commands.insert_resource(settings.clone());
 }
@@ -308,13 +321,19 @@ fn extract_mask_camera_phase(
     }
 }
 
+fn extract_outline_mesh(mut commands: Commands, cameras: Extract<Query<(Entity, &Outline)>>) {
+    for (entity, outline) in cameras.iter() {
+        commands.get_or_spawn(entity).insert(outline.clone());
+    }
+}
+
 fn queue_mesh_masks(
     mesh_mask_draw_functions: Res<DrawFunctions<MeshMask>>,
     mesh_mask_pipeline: Res<MeshMaskPipeline>,
     mut pipelines: ResMut<SpecializedMeshPipelines<MeshMaskPipeline>>,
     mut pipeline_cache: ResMut<PipelineCache>,
     render_meshes: Res<RenderAssets<Mesh>>,
-    outline_meshes: Query<(Entity, &Handle<Mesh>, &MeshUniform)>,
+    outline_meshes: Query<(Entity, &Handle<Mesh>, &MeshUniform), With<Outline>>,
     mut views: Query<(
         &ExtractedView,
         &mut VisibleEntities,
