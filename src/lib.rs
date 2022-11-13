@@ -74,7 +74,7 @@ const FULLSCREEN_PRIMITIVE_STATE: PrimitiveState = PrimitiveState {
 pub struct OutlinePlugin;
 
 /// Performance and visual quality settings for JFA-based outlines.
-#[derive(Clone, ExtractResource)]
+#[derive(Clone, Resource, ExtractResource)]
 pub struct OutlineSettings {
     pub(crate) half_resolution: bool,
 }

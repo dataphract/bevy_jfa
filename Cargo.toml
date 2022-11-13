@@ -21,7 +21,7 @@ bitflags = "1"
 wgpu-profiler = { version = "0.9", optional = true }
 
 [dependencies.bevy]
-version = "0.8.0"
+version = "0.9.0"
 default-features = false
 features = [
     "bevy_asset",
