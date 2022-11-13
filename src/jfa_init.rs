@@ -15,6 +15,7 @@ use bevy::{
 
 use crate::{resources::OutlineResources, JFA_INIT_SHADER_HANDLE, JFA_TEXTURE_FORMAT};
 
+#[derive(Resource)]
 pub struct JfaInitPipeline {
     cached: CachedRenderPipelineId,
 }

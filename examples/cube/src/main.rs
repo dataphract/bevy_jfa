@@ -21,51 +21,55 @@ fn setup(
         ..Default::default()
     });
 
-    commands
-        .spawn_bundle(PbrBundle {
+    commands.spawn((
+        PbrBundle {
             mesh: mesh.clone(),
             material: material.clone(),
             transform: Transform::from_xyz(0.0, 0.0, 0.0),
             ..Default::default()
-        })
-        .insert(RotationAxis(Vec3::Y))
-        .insert(Outline { enabled: true });
+        },
+        RotationAxis(Vec3::Y),
+        Outline { enabled: true },
+    ));
 
-    commands
-        .spawn_bundle(PbrBundle {
+    commands.spawn((
+        PbrBundle {
             mesh: mesh.clone(),
             material: material.clone(),
             transform: Transform::from_xyz(-2.0, 0.0, 0.0),
             ..Default::default()
-        })
-        .insert(RotationAxis(Vec3::X))
-        .insert(Outline { enabled: true });
+        },
+        RotationAxis(Vec3::X),
+        Outline { enabled: true },
+    ));
 
-    commands
-        .spawn_bundle(PbrBundle {
+    commands.spawn((
+        PbrBundle {
             mesh,
             material,
             transform: Transform::from_xyz(0.0, 0.0, -2.0),
             ..Default::default()
-        })
-        .insert(RotationAxis(Vec3::Z))
-        .insert(Outline { enabled: true });
+        },
+        RotationAxis(Vec3::Z),
+        Outline { enabled: true },
+    ));
 
-    commands
-        .spawn_bundle(Camera3dBundle {
+    commands.spawn((
+        Camera3dBundle {
             transform: Transform::from_xyz(3.0, 2.0, 3.0)
                 .looking_at([-1.0, -0.5, -1.0].into(), Vec3::Y),
             ..Camera3dBundle::default()
-        })
-        .insert(CameraOutline {
+        },
+        CameraOutline {
             enabled: true,
             style: outline_styles.add(OutlineStyle {
                 color: Color::hex("b4a2c8").unwrap(),
                 width: 33.0,
             }),
-        });
+        },
+    ));
 
-    commands.spawn_bundle(PointLightBundle {
+    commands.spawn(PointLightBundle {
         point_light: PointLight {
             color: Color::WHITE,
             intensity: 800.0,

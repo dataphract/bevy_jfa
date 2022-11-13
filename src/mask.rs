@@ -17,6 +17,7 @@ use bevy::{
 
 use crate::{resources::OutlineResources, MeshMask, MASK_SHADER_HANDLE};
 
+#[derive(Resource)]
 pub struct MeshMaskPipeline {
     mesh_pipeline: MeshPipeline,
 }

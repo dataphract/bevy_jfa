@@ -45,7 +45,7 @@ pub struct GpuOutlineParams {
     pub(crate) bind_group: BindGroup,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Resource)]
 pub struct OutlinePipeline {
     dimensions_layout: BindGroupLayout,
     input_layout: BindGroupLayout,

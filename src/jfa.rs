@@ -42,6 +42,7 @@ impl Dimensions {
     }
 }
 
+#[derive(Resource)]
 pub struct JfaPipeline {
     cached: CachedRenderPipelineId,
 }

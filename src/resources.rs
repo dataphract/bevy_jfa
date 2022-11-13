@@ -22,6 +22,7 @@ const JFA_FROM_PRIMARY: &str = "jfa_from_primary_output_bind_group";
 const JFA_FROM_SECONDARY: &str = "jfa_from_secondary_output_bind_group";
 const JFA_OUTLINE_SRC: &str = "jfa_outline_src_bind_group";
 
+#[derive(Resource)]
 pub struct OutlineResources {
     // Multisample target for initial mask pass.
     pub mask_multisample: CachedTexture,
