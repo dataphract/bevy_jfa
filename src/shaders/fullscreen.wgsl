@@ -19,7 +19,7 @@ struct Vertex {
 //  \
 //   NDC [-1, -1] / Texcoord [0, 1]
 //
-let VERTICES: array<Vertex, 3> = array<Vertex, 3>(
+const VERTICES: array<Vertex, 3> = array<Vertex, 3>(
     // Bottom left
     Vertex(
         vec2<f32>(-1.0, -1.0),

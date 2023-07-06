@@ -39,8 +39,8 @@ fn fragment(in: FragmentIn) -> @location(0) vec4<f32> {
     // Computed texcoord and stored texcoord are likely to differ even if they
     // represent the same position due to storage as fp16, so an epsilon is
     // needed.
-    if (mask_value < 1.0) {
-        if (mask_value > 0.0) {
+    if mask_value < 1.0 {
+        if mask_value > 0.0 {
             return vec4<f32>(params.color.rgb, 1.0 - mask_value);
         } else {
             let fade = clamp(params.weight - mag, 0.0, 1.0);

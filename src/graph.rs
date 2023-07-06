@@ -90,7 +90,7 @@ pub fn outline(render_app: &mut App) -> Result<RenderGraph, RenderGraphError> {
         outline::input::VIEW_ENTITY,
         outline::node::MASK_PASS,
         MeshMaskNode::IN_VIEW,
-    )?;
+    );
 
     // Mask -> JFA Init
     graph.add_slot_edge(
@@ -98,7 +98,7 @@ pub fn outline(render_app: &mut App) -> Result<RenderGraph, RenderGraphError> {
         MeshMaskNode::OUT_MASK,
         outline::node::JFA_INIT_PASS,
         JfaInitNode::IN_MASK,
-    )?;
+    );
 
     // Input -> JFA
     graph.add_slot_edge(
@@ -106,7 +106,7 @@ pub fn outline(render_app: &mut App) -> Result<RenderGraph, RenderGraphError> {
         outline::input::VIEW_ENTITY,
         outline::node::JFA_PASS,
         JfaNode::IN_VIEW,
-    )?;
+    );
 
     // JFA Init -> JFA
     graph.add_slot_edge(
@@ -114,7 +114,7 @@ pub fn outline(render_app: &mut App) -> Result<RenderGraph, RenderGraphError> {
         JfaInitNode::OUT_JFA_INIT,
         outline::node::JFA_PASS,
         JfaNode::IN_BASE,
-    )?;
+    );
 
     // Input -> Outline
     graph.add_slot_edge(
@@ -122,7 +122,7 @@ pub fn outline(render_app: &mut App) -> Result<RenderGraph, RenderGraphError> {
         outline::input::VIEW_ENTITY,
         outline::node::OUTLINE_PASS,
         OutlineNode::IN_VIEW,
-    )?;
+    );
 
     // JFA -> Outline
     graph.add_slot_edge(
@@ -130,7 +130,7 @@ pub fn outline(render_app: &mut App) -> Result<RenderGraph, RenderGraphError> {
         JfaNode::OUT_JUMP,
         outline::node::OUTLINE_PASS,
         OutlineNode::IN_JFA,
-    )?;
+    );
 
     Ok(graph)
 }
