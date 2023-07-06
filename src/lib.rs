@@ -34,12 +34,12 @@ use bevy::{
         render_graph::RenderGraph,
         render_phase::{
             AddRenderCommand, CachedRenderPipelinePhaseItem, DrawFunctionId, DrawFunctions,
-            EntityPhaseItem, PhaseItem, RenderPhase, SetItemPipeline,
+            PhaseItem, RenderPhase, SetItemPipeline,
         },
         render_resource::*,
         renderer::{RenderDevice, RenderQueue},
         view::{ExtractedView, VisibleEntities},
-        Extract, RenderApp, RenderStage,
+        Extract, RenderApp, RenderSet,
     },
     utils::FloatOrd,
 };
@@ -74,7 +74,7 @@ const FULLSCREEN_PRIMITIVE_STATE: PrimitiveState = PrimitiveState {
 pub struct OutlinePlugin;
 
 /// Performance and visual quality settings for JFA-based outlines.
-#[derive(Clone, ExtractResource)]
+#[derive(Clone, ExtractResource, Resource)]
 pub struct OutlineSettings {
     pub(crate) half_resolution: bool,
 }
@@ -154,31 +154,27 @@ impl Plugin for OutlinePlugin {
             .init_resource::<jfa::JfaPipeline>()
             .init_resource::<outline::OutlinePipeline>()
             .init_resource::<SpecializedRenderPipelines<outline::OutlinePipeline>>()
-            .add_system_to_stage(RenderStage::Extract, extract_outline_settings)
-            .add_system_to_stage(RenderStage::Extract, extract_camera_outlines)
-            .add_system_to_stage(RenderStage::Extract, extract_mask_camera_phase)
-            .add_system_to_stage(RenderStage::Prepare, resources::recreate_outline_resources)
-            .add_system_to_stage(RenderStage::Queue, queue_mesh_masks);
+            .add_system(extract_outline_settings.in_schedule(ExtractSchedule))
+            .add_system(extract_camera_outlines.in_schedule(ExtractSchedule))
+            .add_system(extract_mask_camera_phase.in_schedule(ExtractSchedule))
+            .add_system(resources::recreate_outline_resources.in_set(RenderSet::Queue))
+            .add_system(queue_mesh_masks.in_set(RenderSet::Queue));
 
         let outline_graph = graph::outline(render_app).unwrap();
 
         let mut root_graph = render_app.world.resource_mut::<RenderGraph>();
         let draw_3d_graph = root_graph.get_sub_graph_mut(core_3d::graph::NAME).unwrap();
-        let draw_3d_input = draw_3d_graph.input_node().unwrap().id;
+        let draw_3d_input = draw_3d_graph.input_node().id;
 
         draw_3d_graph.add_sub_graph(outline_graph::NAME, outline_graph);
         let outline_driver = draw_3d_graph.add_node(OutlineDriverNode::NAME, OutlineDriverNode);
-        draw_3d_graph
-            .add_slot_edge(
-                draw_3d_input,
-                core_3d::graph::input::VIEW_ENTITY,
-                outline_driver,
-                OutlineDriverNode::INPUT_VIEW,
-            )
-            .unwrap();
-        draw_3d_graph
-            .add_node_edge(core_3d::graph::node::MAIN_PASS, outline_driver)
-            .unwrap();
+        draw_3d_graph.add_slot_edge(
+            draw_3d_input,
+            core_3d::graph::input::VIEW_ENTITY,
+            outline_driver,
+            OutlineDriverNode::INPUT_VIEW,
+        );
+        draw_3d_graph.add_node_edge(core_3d::graph::node::MAIN_PASS, outline_driver);
     }
 }
 
@@ -199,9 +195,7 @@ impl PhaseItem for MeshMask {
     fn draw_function(&self) -> DrawFunctionId {
         self.draw_function
     }
-}
 
-impl EntityPhaseItem for MeshMask {
     fn entity(&self) -> Entity {
         self.entity
     }

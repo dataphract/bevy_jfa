@@ -2,7 +2,6 @@ use bevy::{
     prelude::*,
     render::{
         render_graph::{Node, NodeRunError, RenderGraphContext, SlotInfo, SlotType},
-        render_phase::TrackedRenderPass,
         render_resource::{
             CachedRenderPipelineId, ColorTargetState, ColorWrites, Face, FragmentState, FrontFace,
             LoadOp, MultisampleState, Operations, PipelineCache, PolygonMode, PrimitiveState,
@@ -15,6 +14,7 @@ use bevy::{
 
 use crate::{resources::OutlineResources, JFA_INIT_SHADER_HANDLE, JFA_TEXTURE_FORMAT};
 
+#[derive(Resource)]
 pub struct JfaInitPipeline {
     cached: CachedRenderPipelineId,
 }
@@ -25,10 +25,10 @@ impl FromWorld for JfaInitPipeline {
         let dims_layout = res.dimensions_bind_group_layout.clone();
         let init_layout = res.jfa_init_bind_group_layout.clone();
 
-        let mut pipeline_cache = world.get_resource_mut::<PipelineCache>().unwrap();
+        let pipeline_cache = world.get_resource_mut::<PipelineCache>().unwrap();
         let cached = pipeline_cache.queue_render_pipeline(RenderPipelineDescriptor {
             label: Some("outline_jfa_init_pipeline".into()),
-            layout: Some(vec![dims_layout, init_layout]),
+            layout: vec![dims_layout, init_layout],
             vertex: VertexState {
                 shader: JFA_INIT_SHADER_HANDLE.typed::<Shader>(),
                 shader_defs: vec![],
@@ -56,6 +56,7 @@ impl FromWorld for JfaInitPipeline {
                     write_mask: ColorWrites::ALL,
                 })],
             }),
+            push_constant_ranges: vec![],
         });
 
         JfaInitPipeline { cached }
@@ -115,29 +116,26 @@ impl Node for JfaInitNode {
             }
         };
 
-        let render_pass = render_context
-            .command_encoder
-            .begin_render_pass(&RenderPassDescriptor {
-                label: Some("outline_jfa_init"),
-                color_attachments: &[Some(RenderPassColorAttachment {
-                    view: &res.jfa_primary_output.default_view,
-                    resolve_target: None,
-                    ops: Operations {
-                        load: LoadOp::Clear(
-                            Color::RgbaLinear {
-                                red: -1.0,
-                                green: -1.0,
-                                blue: 0.0,
-                                alpha: 0.0,
-                            }
-                            .into(),
-                        ),
-                        store: true,
-                    },
-                })],
-                depth_stencil_attachment: None,
-            });
-        let mut tracked_pass = TrackedRenderPass::new(render_pass);
+        let mut tracked_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
+            label: Some("outline_jfa_init"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: &res.jfa_primary_output.default_view,
+                resolve_target: None,
+                ops: Operations {
+                    load: LoadOp::Clear(
+                        Color::RgbaLinear {
+                            red: -1.0,
+                            green: -1.0,
+                            blue: 0.0,
+                            alpha: 0.0,
+                        }
+                        .into(),
+                    ),
+                    store: true,
+                },
+            })],
+            depth_stencil_attachment: None,
+        });
         tracked_pass.set_render_pipeline(cached_pipeline);
         tracked_pass.set_bind_group(0, &res.dimensions_bind_group, &[]);
         tracked_pass.set_bind_group(1, &res.jfa_init_bind_group, &[]);

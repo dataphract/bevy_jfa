@@ -22,7 +22,7 @@ fn setup(
     });
 
     commands
-        .spawn_bundle(PbrBundle {
+        .spawn(PbrBundle {
             mesh: mesh.clone(),
             material: material.clone(),
             transform: Transform::from_xyz(0.0, 0.0, 0.0),
@@ -32,7 +32,7 @@ fn setup(
         .insert(Outline { enabled: true });
 
     commands
-        .spawn_bundle(PbrBundle {
+        .spawn(PbrBundle {
             mesh: mesh.clone(),
             material: material.clone(),
             transform: Transform::from_xyz(-2.0, 0.0, 0.0),
@@ -42,7 +42,7 @@ fn setup(
         .insert(Outline { enabled: true });
 
     commands
-        .spawn_bundle(PbrBundle {
+        .spawn(PbrBundle {
             mesh,
             material,
             transform: Transform::from_xyz(0.0, 0.0, -2.0),
@@ -52,7 +52,7 @@ fn setup(
         .insert(Outline { enabled: true });
 
     commands
-        .spawn_bundle(Camera3dBundle {
+        .spawn(Camera3dBundle {
             transform: Transform::from_xyz(3.0, 2.0, 3.0)
                 .looking_at([-1.0, -0.5, -1.0].into(), Vec3::Y),
             ..Camera3dBundle::default()
@@ -65,7 +65,7 @@ fn setup(
             }),
         });
 
-    commands.spawn_bundle(PointLightBundle {
+    commands.spawn(PointLightBundle {
         point_light: PointLight {
             color: Color::WHITE,
             intensity: 800.0,
@@ -99,6 +99,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugin(OutlinePlugin)
+        // .insert_resource(Msaa::Off)
         .add_startup_system(setup)
         .add_system(rotate_cube)
         .add_system(handle_keys)

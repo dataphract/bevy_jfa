@@ -13,7 +13,6 @@ use bevy::{
         texture::{CachedTexture, TextureCache},
         view::ExtractedWindows,
     },
-    window::WindowId,
 };
 
 use crate::{jfa, outline, OutlineSettings, JFA_TEXTURE_FORMAT};
@@ -22,6 +21,7 @@ const JFA_FROM_PRIMARY: &str = "jfa_from_primary_output_bind_group";
 const JFA_FROM_SECONDARY: &str = "jfa_from_secondary_output_bind_group";
 const JFA_OUTLINE_SRC: &str = "jfa_outline_src_bind_group";
 
+#[derive(Resource)]
 pub struct OutlineResources {
     // Multisample target for initial mask pass.
     pub mask_multisample: CachedTexture,
@@ -408,9 +408,12 @@ pub fn recreate_outline_resources(
     mut textures: ResMut<TextureCache>,
     windows: Res<ExtractedWindows>,
 ) {
-    let primary = match windows.get(&WindowId::primary()) {
-        Some(w) => w,
-        None => return,
+    let Some(primary_entity) = windows.primary else {
+        return
+    };
+
+    let Some(primary) = windows.get(&primary_entity) else {
+        return;
     };
 
     let half_size = Extent3d {
@@ -514,5 +517,6 @@ fn tex_desc(label: &'static str, size: Extent3d, format: TextureFormat) -> Textu
         dimension: TextureDimension::D2,
         format,
         usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
     }
 }

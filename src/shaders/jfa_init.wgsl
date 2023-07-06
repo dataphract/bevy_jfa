@@ -36,23 +36,23 @@ fn fragment(in: FragmentIn) -> @location(0) vec4<f32> {
     samples[2][1] = textureSample(mask_buffer, mask_sampler, in.texcoord + vec2<f32>(dx, 0.0)).x;
     samples[2][2] = textureSample(mask_buffer, mask_sampler, in.texcoord + vec2<f32>(dx, dy)).x;
 
-    if (samples[1][1] > 0.99) {
+    if samples[1][1] > 0.99 {
         return out_position;
     }
 
-    if (samples[1][1] < 0.01) {
+    if samples[1][1] < 0.01 {
         return vec4<f32>(-1.0, -1.0, 0.0, 1.0);
     }
 
     let sobel_x = samples[0][0] + 2.0 * samples[0][1] + samples[0][2] - samples[2][0] - 2.0 * samples[2][1] - samples[2][2];
     let sobel_y = samples[0][0] + 2.0 * samples[1][0] + samples[2][0] - samples[0][2] - 2.0 * samples[1][2] - samples[2][2];
-    let dir = -vec2<f32>(sobel_x, sobel_y);
+    var dir = -vec2<f32>(sobel_x, sobel_y);
 
-    if (abs(dir.x) < 0.005 && abs(dir.y) < 0.005) {
+    if abs(dir.x) < 0.005 && abs(dir.y) < 0.005 {
         return out_position;
     }
 
-    let dir = normalize(dir);
+    dir = normalize(dir);
     let offset = dir * (1.0 - samples[1][1]) * vec2<f32>(dx, dy);
 
     return out_position + vec4<f32>(offset, 0.0, 1.0);

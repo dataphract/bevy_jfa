@@ -2,9 +2,9 @@ use bevy::{
     pbr::{MeshPipeline, MeshPipelineKey},
     prelude::*,
     render::{
-        mesh::InnerMeshVertexBufferLayout,
+        mesh::MeshVertexBufferLayout,
         render_graph::{Node, RenderGraphContext, SlotInfo, SlotType},
-        render_phase::{DrawFunctions, PhaseItem, RenderPhase, TrackedRenderPass},
+        render_phase::RenderPhase,
         render_resource::{
             ColorTargetState, ColorWrites, FragmentState, LoadOp, MultisampleState, Operations,
             RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor,
@@ -12,11 +12,11 @@ use bevy::{
         },
         renderer::RenderContext,
     },
-    utils::{FixedState, Hashed},
 };
 
 use crate::{resources::OutlineResources, MeshMask, MASK_SHADER_HANDLE};
 
+#[derive(Resource)]
 pub struct MeshMaskPipeline {
     mesh_pipeline: MeshPipeline,
 }
@@ -35,14 +35,14 @@ impl SpecializedMeshPipeline for MeshMaskPipeline {
     fn specialize(
         &self,
         key: Self::Key,
-        layout: &Hashed<InnerMeshVertexBufferLayout, FixedState>,
+        layout: &MeshVertexBufferLayout,
     ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
         let mut desc = self.mesh_pipeline.specialize(key, layout)?;
 
-        desc.layout = Some(vec![
-            self.mesh_pipeline.view_layout.clone(),
+        desc.layout = vec![
+            self.mesh_pipeline.view_layout_multisampled.clone(),
             self.mesh_pipeline.mesh_layout.clone(),
-        ]);
+        ];
 
         desc.vertex.shader = MASK_SHADER_HANDLE.typed::<Shader>();
 
@@ -117,33 +117,24 @@ impl Node for MeshMaskNode {
             .unwrap();
 
         let view_entity = graph.get_input_entity(Self::IN_VIEW).unwrap();
-        let stencil_phase = match self.query.get_manual(world, view_entity) {
-            Ok(q) => q,
-            Err(_) => return Ok(()),
+        let Ok(stencil_phase) = self.query.get_manual(world, view_entity) else {
+            return Ok(());
         };
 
-        let pass_raw = render_context
-            .command_encoder
-            .begin_render_pass(&RenderPassDescriptor {
-                label: Some("outline_stencil_render_pass"),
-                color_attachments: &[Some(RenderPassColorAttachment {
-                    view: &res.mask_multisample.default_view,
-                    resolve_target: Some(&res.mask_output.default_view),
-                    ops: Operations {
-                        load: LoadOp::Clear(Color::BLACK.into()),
-                        store: true,
-                    },
-                })],
-                depth_stencil_attachment: None,
-            });
-        let mut pass = TrackedRenderPass::new(pass_raw);
+        let mut tracked_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
+            label: Some("outline_stencil_render_pass"),
+            color_attachments: &[Some(RenderPassColorAttachment {
+                view: &res.mask_multisample.default_view,
+                resolve_target: Some(&res.mask_output.default_view),
+                ops: Operations {
+                    load: LoadOp::Clear(Color::BLACK.into()),
+                    store: true,
+                },
+            })],
+            depth_stencil_attachment: None,
+        });
 
-        let draw_functions = world.get_resource::<DrawFunctions<MeshMask>>().unwrap();
-        let mut draw_functions = draw_functions.write();
-        for item in stencil_phase.items.iter() {
-            let draw_function = draw_functions.get_mut(item.draw_function()).unwrap();
-            draw_function.draw(world, &mut pass, view_entity, item);
-        }
+        stencil_phase.render(&mut tracked_pass, world, view_entity);
 
         Ok(())
     }
